@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <algorithm>
 #include <math.h>
+#include <set>
 
 #include "bioparser/bioparser.hpp"
 
@@ -106,6 +107,14 @@ struct Overlap {
     bool strand;
 };
 
+struct Vertex {
+    Vertex(Overlap read) : read(read) {}
+
+    Overlap read;
+    std::vector<Vertex*> vertices;
+    Vertex* parent = NULL;
+};
+
 std::unordered_map<std::string, std::uint32_t> Overlap::name_to_id;
 
 inline bool isSuffix(const std::string& src, const std::string& suffix) {
@@ -117,8 +126,7 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annota
     std::vector<std::unique_ptr<Overlap>>& overlaps);
 
 void reconstruct(std::vector<Annotation>& dst,
-    std::vector<std::unique_ptr<Overlap>>& overlaps) {
-}
+    std::vector<std::unique_ptr<Overlap>>& overlaps);
 
 int main(int argc, char** argv) {
 
@@ -198,7 +206,7 @@ int main(int argc, char** argv) {
     std::vector<Annotation> annotations(Overlap::name_to_id.size());
 
     auto ret = annotate(annotations, overlaps);
-    //reconstruct(annotations, overlaps);
+    reconstruct(annotations, overlaps);
 
     return 0;
 }
@@ -354,6 +362,144 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annota
     }
 
     return reference_repeating_regions;
+}
+
+std::vector<Vertex*> DepthFirstSearch(std::unordered_map<std::uint64_t, std::vector<Vertex*>> heads);
+void clear_contained_reads(std::vector<std::unique_ptr<Overlap>> &overlaps, std::vector<Annotation>& dst);
+std::unordered_map<std::uint64_t, std::vector<Vertex*>> create_graph(std::vector<Vertex> &vertices, std::vector<std::unique_ptr<Overlap>> &overlaps);
+void statistics(std::vector<Vertex*> ends);
+
+void reconstruct(std::vector<Annotation>& dst,
+    std::vector<std::unique_ptr<Overlap>>& overlaps) {
+    clear_contained_reads(overlaps, dst);
+    //remove_covered_repeats(repeats, paf_objects);
+    std::vector<Vertex> vertices;
+    std::unordered_map<std::uint64_t, std::vector<Vertex*>> heads = create_graph(vertices, overlaps);
+    std::vector<Vertex*> ends = DepthFirstSearch(heads);
+    statistics(ends);
+}
+
+bool paf_unique(const std::unique_ptr<Overlap>& a, const std::unique_ptr<Overlap>& b) {
+    return a->q_id == b->q_id;
+}
+
+void clear_contained_reads(std::vector<std::unique_ptr<Overlap>> &overlaps, std::vector<Annotation>& dst) {
+    std::vector<std::unique_ptr<Overlap>>::iterator it = overlaps.begin();
+    auto long_cmp = [](const std::unique_ptr<Overlap>& a, const std::unique_ptr<Overlap>& b) {
+        if (a->t_id == b->t_id) { 
+            return (a->t_end - a->t_begin > b->t_end - b->t_begin);
+        }
+        return (a->t_id > b->t_id);
+    };
+    std::sort(overlaps.begin(), overlaps.end(), long_cmp);
+    it = std::unique (overlaps.begin(), overlaps.end(), paf_unique);
+    overlaps.resize(std::distance(overlaps.begin(), it));
+    auto start_cmp = [](const std::unique_ptr<Overlap>& a, const std::unique_ptr<Overlap>& b) {
+        if (a->t_id == b->t_id) { 
+            if (a->t_begin == b->t_begin) {
+                return (a->t_end > b->t_end);
+            }
+            return (a->t_begin < b->t_begin);
+        }
+        return (a->t_id > b->t_id);
+    };
+    std::sort(overlaps.begin(), overlaps.end(), start_cmp);
+    it = overlaps.begin();
+    std::vector<std::unique_ptr<Overlap>>::iterator next;
+    std::vector<std::unique_ptr<Overlap>>::iterator to_remove;
+    uint64_t r1, r2;
+    int s, e;
+    uint64_t id;
+    while (it != --overlaps.end()) {
+        s = (*it)->t_begin;
+        e = (*it)->t_end;
+        id = (*it)->t_id;
+        overlaps.erase(std::remove_if(it+1, overlaps.end(), [&s, &e, &id](std::unique_ptr<Overlap> &p){return p->t_begin >= s && p->t_end <= e && p->t_id == id;}), overlaps.end());
+        if (it != --overlaps.end()) {
+            it++;
+        }
+    }
+}
+
+std::unordered_map<std::uint64_t, std::vector<Vertex*>> create_graph(std::vector<Vertex> &vertices, std::vector<std::unique_ptr<Overlap>> &overlaps) {
+    for (auto const& overlap: overlaps) {
+        vertices.emplace_back(Vertex(*overlap));
+    }
+    std::vector<Vertex>::iterator it = vertices.begin();
+    std::vector<Vertex>::iterator next;
+    std::vector<Vertex*> heads;
+    std::unordered_map<std::uint64_t, std::vector<Vertex*>> re;
+    heads.emplace_back(&(*it));
+    while(it != --vertices.end()) {
+        next = std::next(it);
+        if ((*next).read.t_id != (*it).read.t_id) {
+            re[(*it).read.t_id] = heads;
+            heads.clear();
+            heads.emplace_back(&(*next));
+            it++;
+            continue;
+        }
+        while ((*next).read.t_begin <= (*it).read.t_end && (*next).read.t_id == (*it).read.t_id) {
+            it->vertices.emplace_back(&(*next));
+            next++;
+            if(next == vertices.end()) break;
+        }
+        if (next == std::next(it) && (*next).read.t_id == (*std::next(it)).read.t_id) heads.emplace_back(&(*next));
+        it++;
+    }
+    re[(*it).read.t_id] = heads;
+    heads.clear();
+    for (auto const& vertex : vertices) {
+        printf("S\t%llu\t%c\tLN:i:%u\n", vertex.read.q_id, '*', vertex.read.q_length);
+        for (auto const& next: vertex.vertices) {
+            printf("L\t%llu\t%c\t%llu\t%c\t%c\n", vertex.read.q_id, '+', next->read.q_id, '-', '*');
+        }
+    }
+    return re;
+}
+
+std::vector<Vertex*> DepthFirstSearch(std::unordered_map<std::uint64_t, std::vector<Vertex*>> heads) {
+    Vertex* max;
+    Vertex* head;
+    Vertex* longest;
+    std::vector<Vertex*> ends;
+    int begin;
+    for (auto const& seq: heads) {
+        unsigned int length=0;
+        for (unsigned int i = 0; i < seq.second.size(); i++) {
+            head = seq.second[i];
+            begin = head->read.t_begin;
+            while(!head->vertices.empty()) {
+                max = head->vertices[0];
+                for (auto const& vertex : head->vertices) {
+                    if (vertex->read.t_begin > max->read.t_begin) max = vertex;
+                }
+                max->parent = head;
+                head = max;
+            }
+            if (length < head->read.t_begin - begin) {
+                length = head->read.t_begin - begin;
+                longest = head;
+            }
+        }
+        ends.emplace_back(longest);
+    }
+    return ends;
+}
+
+void statistics(std::vector<Vertex*> ends) {
+    int count, last_index;
+    for (auto const& end: ends) {
+        count = 1;
+        auto curr = end;
+        last_index = end->read.t_end;
+        while (curr->parent != NULL) {
+            count++;
+            curr = curr->parent;
+        }
+        fprintf(stderr, "Genome coverage: %f%%\n", (last_index - curr->read.t_begin) / (float) end->read.t_length * 100);
+        fprintf(stderr, "Number of used reads: %d\n", count);
+    }
 }
 
 void help() {
