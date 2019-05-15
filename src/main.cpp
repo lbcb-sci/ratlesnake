@@ -316,26 +316,6 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annota
     std::vector<std::pair<std::uint64_t, std::uint64_t>>::iterator vec_it;
     vec_it = std::unique(reference_repeating_regions.begin(), reference_repeating_regions.end(), unique_reference_repeating_sections);
     reference_repeating_regions.resize(std::distance(reference_repeating_regions.begin(), vec_it));
-    /*for (int i = 0; i < reference_repeating_regions.size() - 1; i++) {
-        for (int j = i + 1; i < reference_repeating_regions.size();) {
-            std::uint64_t mask = (pow(2, 32) - 1);
-            std::uint64_t ref_id = std::get<0>(reference_repeating_regions[i]);
-            std::uint64_t end_pos = (std::get<1>(reference_repeating_regions[i]) & mask);
-            std::uint64_t other_end_pos = std::get<0>(reference_repeating_regions[j]) & mask;
-            mask = mask << 32;
-            std::uint64_t start_pos = (std::get<1>(reference_repeating_regions[i]) & mask);
-            std::uint64_t other_start_pos = (std::get<0>(reference_repeating_regions[j]) & mask) >> 32;
-            if(std::get<0>(reference_repeating_regions[j]) == ref_id) {
-                if (other_start_pos >= start_pos && other_end_pos <= end_pos) {
-                    reference_repeating_regions.erase(reference_repeating_regions.begin() + j);
-                    break;
-                } else {
-                    j++;
-                }
-            }
-        }*/
-        //reference_repeating_regions.erase(std::remove_if(reference_repeating_regions.begin(), reference_repeating_regions.end(),
-        //[mask, start_pos, end_pos](std::pair<std::uint64_t, uint64_t>& r){return ((std::get<1>(r) & mask) <= end_pos && ((std::get<1>(r) & (mask << 32)) >> 32) >= start_pos);}), reference_repeating_regions.end());
 
     for(auto itr = chimeric_reads.begin(); itr != chimeric_reads.end(); itr++) {
         Annotation ann = dst[itr->first];
