@@ -37,6 +37,18 @@ struct Sequence {
     std::string data;
 };
 
+struct Annotation {
+    Annotation() {
+    }
+    ~Annotation() {
+    }
+
+    std::uint64_t valid;
+    std::vector<std::uint64_t> inclusion;
+    std::vector<std::uint64_t> chimeric;
+    std::vector<std::uint64_t> repeat;
+};
+
 struct Overlap {
     Overlap(
         const char* q_name, std::uint32_t q_name_length,
@@ -96,6 +108,14 @@ std::unordered_map<std::string, std::uint32_t> Overlap::name_to_id;
 inline bool isSuffix(const std::string& src, const std::string& suffix) {
     return src.size() < suffix.size() ? false :
         src.compare(src.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+void annotate(std::vector<Annotation>& dst,
+    const std::vector<std::unique_ptr<Overlap>>& overlaps) {
+}
+
+void reconstruct(std::vector<Annotation>& dst,
+    std::vector<std::unique_ptr<Overlap>>& overlaps) {
 }
 
 int main(int argc, char** argv) {
@@ -172,6 +192,11 @@ int main(int argc, char** argv) {
 
     std::vector<std::unique_ptr<Overlap>> overlaps;
     oparser->parse(overlaps, -1);
+
+    std::vector<Annotation> annotations(Overlap::name_to_id.size());
+
+    annotate(annotations, overlaps);
+    reconstruct(annotations, overlaps);
 
     return 0;
 }
