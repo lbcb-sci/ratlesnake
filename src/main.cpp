@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <memory>
+#include <unordered_map>
 
 #include "bioparser/bioparser.hpp"
 
@@ -49,27 +51,47 @@ struct Overlap {
         std::uint32_t,
         std::uint32_t,
         std::uint32_t)
-            : q_name(q_name, q_name_length),
+            : q_id(),
             q_length(q_length),
             q_begin(q_begin),
             q_end(q_end),
-            t_name(t_name, t_name_length),
+            t_id(),
             t_length(t_length),
             t_begin(t_begin),
             t_end(t_end),
             strand(orientation == '-') {
+
+        std::string q(q_name, q_name_length);
+        if (name_to_id.find(q) != name_to_id.end()) {
+            q_id = name_to_id[q];
+        } else {
+            q_id = name_to_id.size();
+            name_to_id[q] = name_to_id.size();
+        }
+
+        std::string t(t_name, t_name_length);
+        if (name_to_id.find(t) != name_to_id.end()) {
+            t_id = name_to_id[t];
+        } else {
+            t_id = name_to_id.size();
+            name_to_id[t] = name_to_id.size();
+        }
     }
 
-    std::string q_name;
+    static std::unordered_map<std::string, std::uint32_t> name_to_id;
+
+    std::uint64_t q_id;
     std::uint32_t q_length;
     std::uint32_t q_begin;
     std::uint32_t q_end;
-    std::string t_name;
+    std::uint64_t t_id;
     std::uint32_t t_length;
     std::uint32_t t_begin;
     std::uint32_t t_end;
     bool strand;
 };
+
+std::unordered_map<std::string, std::uint32_t> Overlap::name_to_id;
 
 inline bool isSuffix(const std::string& src, const std::string& suffix) {
     return src.size() < suffix.size() ? false :
@@ -147,6 +169,9 @@ int main(int argc, char** argv) {
         std::endl;
         return 1;
     }
+
+    std::vector<std::unique_ptr<Overlap>> overlaps;
+    oparser->parse(overlaps, -1);
 
     return 0;
 }
