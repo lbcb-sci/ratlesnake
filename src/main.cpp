@@ -5,6 +5,9 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
+#include <algorithm>
+#include <math.h>
 
 #include "bioparser/bioparser.hpp"
 
@@ -110,9 +113,8 @@ inline bool isSuffix(const std::string& src, const std::string& suffix) {
         src.compare(src.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-void annotate(std::vector<Annotation>& dst,
-    const std::vector<std::unique_ptr<Overlap>>& overlaps) {
-}
+std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annotation>& dst,
+    std::vector<std::unique_ptr<Overlap>>& overlaps);
 
 void reconstruct(std::vector<Annotation>& dst,
     std::vector<std::unique_ptr<Overlap>>& overlaps) {
@@ -195,10 +197,183 @@ int main(int argc, char** argv) {
 
     std::vector<Annotation> annotations(Overlap::name_to_id.size());
 
-    annotate(annotations, overlaps);
-    reconstruct(annotations, overlaps);
+    auto ret = annotate(annotations, overlaps);
+    //reconstruct(annotations, overlaps);
 
     return 0;
+}
+
+struct Mapping {
+    std::uint32_t seq_start;
+    std::uint32_t seq_end;
+    std::uint32_t gen_start;
+    std::uint32_t gen_end;
+    std::uint32_t gen_length;
+    std::uint64_t ref_id;
+
+    Mapping(std::uint32_t seq_s, std::uint32_t seq_e, std::uint32_t gen_s, std::uint32_t gen_e, std::uint32_t gen_l, std::uint64_t ref_n) :
+        seq_start(seq_s),
+        seq_end(seq_e),
+        gen_start(gen_s),
+        gen_end(gen_e),
+        gen_length(gen_l),
+        ref_id(ref_n)
+    { }
+};
+
+bool sort_paf(const std::unique_ptr<Overlap>& s1, const std::unique_ptr<Overlap>& s2) {
+    if (s1->q_id == s2->q_id) {
+        if(s1->q_begin == s2->q_begin) {
+            return (s1->q_end > s2->q_end);
+        }
+        return (s1->q_begin < s2->q_begin);
+    }
+    return (s1->q_id < s2->q_id);
+}
+
+bool sort_reference_repeating_sections(std::pair<std::uint64_t, std::uint64_t>& p1, std::pair<std::uint64_t, std::uint64_t>& p2) {
+    if (std::get<0>(p1) == std::get<0>(p2)) {
+        return std::get<1>(p1) > std::get<1>(p2);
+    }
+    return std::get<0>(p1) < std::get<0>(p2);
+}
+
+bool unique_reference_repeating_sections(std::pair<std::uint64_t, std::uint64_t>& p1, std::pair<std::uint64_t, std::uint64_t>& p2){
+    return (std::get<0>(p1) == std::get<0>(p2) && std::get<1>(p1) == std::get<1>(p2));
+}
+
+std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annotation>& dst,
+    std::vector<std::unique_ptr<Overlap>>& overlaps) {
+
+    std::sort(overlaps.begin(), overlaps.end(), sort_paf);
+
+    std::unordered_map<std::uint64_t, std::vector<Mapping>> sequence_mapping_details;
+
+    for(auto &i : overlaps) {
+        std::uint64_t key = i->q_id;
+        Mapping mapp(i->q_begin, i->q_end, i->t_begin, i->t_end, i->t_length, i->t_id);
+        if(sequence_mapping_details.find(key) == sequence_mapping_details.end()) {
+            std::vector<Mapping> vec;
+            vec.push_back(mapp);
+            sequence_mapping_details[key] = vec;
+        } else {
+            (sequence_mapping_details[key]).push_back(mapp);
+        }
+    }
+
+    std::unordered_map<std::uint64_t, std::vector<Mapping>> chimeric_reads;
+    std::unordered_map<std::uint64_t, std::vector<Mapping>> repeating_reads;
+    std::unordered_set<std::uint64_t> chimers;
+    std::unordered_set<std::uint64_t> repeatings;
+    std::vector<Mapping> all_repeatings;
+
+    for (auto itr = sequence_mapping_details.begin(); itr != sequence_mapping_details.end(); itr++) {
+        if ((itr->second).size() > 1) {
+            uint32_t seq_start = (itr->second)[0].seq_start;
+            uint32_t seq_end = (itr->second)[0].seq_end;
+            uint32_t gen_start = (itr->second)[0].gen_start;
+            uint32_t gen_end = (itr->second)[0].gen_end;
+            for (int i = 1; i < (itr->second).size(); i++) {
+                if (!(seq_start <= (itr->second)[i].seq_start && seq_end >= (itr->second)[i].seq_end)) {
+                    chimers.emplace(itr->first);
+                    int seq_gap = abs((int)(std::max(seq_start, (itr->second)[i].seq_start) - std::min(seq_end, (itr->second)[i].seq_end)));
+                    int ref_gap = abs((int)(std::max(gen_start, (itr->second)[i].gen_start) - std::min(seq_end, (itr->second)[i].seq_end)));
+                    if (std::min(gen_start, (itr->second)[i].gen_start) > 100 || std::max(gen_end, (itr->second)[i].gen_end) < ((itr->second)[i].gen_length - 100)
+                    && (std::min(ref_gap, seq_gap)/std::max(ref_gap, seq_gap)) > 0.12) {
+                        chimeric_reads[itr->first] = itr->second;
+                        break;
+                    }
+                }
+            } if (chimers.find(itr->first) == chimers.end()) {
+                int i = 1;
+                if ((itr->second)[0].seq_start == (itr->second)[1].seq_start && (itr->second)[0].seq_end == (itr->second)[1].seq_end) {
+                    i = 0;
+                }
+                all_repeatings.insert(all_repeatings.end(), (itr->second).begin() + i, (itr->second).end());
+                repeating_reads[itr->first] = itr->second;
+                repeatings.emplace(itr->first);
+            }
+        }
+    }
+
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> reference_repeating_regions;
+
+    for (int i = 0; i < all_repeatings.size(); i++) {
+        for(int j = 0; j < all_repeatings.size(); j++) {
+            if (all_repeatings[i].ref_id == all_repeatings[j].ref_id &&  i != j) {
+                if (abs((int)(all_repeatings[i].gen_start - all_repeatings[j].gen_start)) + abs((int)(all_repeatings[i].gen_end - all_repeatings[j].gen_end)) < 1000) {
+                    std::uint64_t position = all_repeatings[i].gen_start;
+                    position = position << 32;
+                    position += all_repeatings[i].gen_end;
+                    reference_repeating_regions.push_back(std::make_pair(all_repeatings[i].ref_id, position));
+                }
+            }
+        }
+    }
+
+
+    std::sort(reference_repeating_regions.begin(), reference_repeating_regions.end(), sort_reference_repeating_sections);
+    std::vector<std::pair<std::uint64_t, std::uint64_t>>::iterator vec_it;
+    vec_it = std::unique(reference_repeating_regions.begin(), reference_repeating_regions.end(), unique_reference_repeating_sections);
+    reference_repeating_regions.resize(std::distance(reference_repeating_regions.begin(), vec_it));
+    /*for (int i = 0; i < reference_repeating_regions.size() - 1; i++) {
+        for (int j = i + 1; i < reference_repeating_regions.size();) {
+            std::uint64_t mask = (pow(2, 32) - 1);
+            std::uint64_t ref_id = std::get<0>(reference_repeating_regions[i]);
+            std::uint64_t end_pos = (std::get<1>(reference_repeating_regions[i]) & mask);
+            std::uint64_t other_end_pos = std::get<0>(reference_repeating_regions[j]) & mask;
+            mask = mask << 32;
+            std::uint64_t start_pos = (std::get<1>(reference_repeating_regions[i]) & mask);
+            std::uint64_t other_start_pos = (std::get<0>(reference_repeating_regions[j]) & mask) >> 32;
+            if(std::get<0>(reference_repeating_regions[j]) == ref_id) {
+                if (other_start_pos >= start_pos && other_end_pos <= end_pos) {
+                    reference_repeating_regions.erase(reference_repeating_regions.begin() + j);
+                    break;
+                } else {
+                    j++;
+                }
+            }
+        }*/
+        //reference_repeating_regions.erase(std::remove_if(reference_repeating_regions.begin(), reference_repeating_regions.end(),
+        //[mask, start_pos, end_pos](std::pair<std::uint64_t, uint64_t>& r){return ((std::get<1>(r) & mask) <= end_pos && ((std::get<1>(r) & (mask << 32)) >> 32) >= start_pos);}), reference_repeating_regions.end());
+
+    for(auto itr = chimeric_reads.begin(); itr != chimeric_reads.end(); itr++) {
+        Annotation ann = dst[itr->first];
+        std::vector<uint64_t> chimeric_annotations;
+        for(int i = 0; i < (itr->second).size() - 1; i++) {
+            if((itr->second)[i].seq_start != (itr->second)[i+1].seq_start && (itr->second)[i].seq_end != (itr->second)[i+1].seq_end){
+                uint64_t positions = (itr->second)[i].seq_start;
+                positions = positions << 32;
+                positions = positions + (itr->second)[i+1].seq_end;
+                chimeric_annotations.push_back(positions);
+
+            }
+        }
+        ann.chimeric = chimeric_annotations;
+        dst[itr->first] = ann;
+    }
+
+    for(auto itr = repeating_reads.begin(); itr != repeating_reads.end(); itr++) {
+        Annotation ann = dst[itr->first];
+        std::vector<uint64_t> repeating__annotations;
+        int i = 1;
+        if ((itr->second[0]).seq_start == (itr->second[1]).seq_start && (itr->second[0]).seq_end == (itr->second[1]).seq_end) {
+            i = 0;
+        }
+        while(i < (itr->second).size()) {
+            uint64_t positions = (itr->second)[i].seq_start;
+            positions = positions << 32;
+            positions = positions + (itr->second)[i].seq_end;
+            if(std::find(repeating__annotations.begin(), repeating__annotations.end(), positions) == repeating__annotations.end()) {
+                repeating__annotations.push_back(positions);
+            }
+            i++;
+        }
+        ann.repeat = repeating__annotations;
+        dst[itr->first] = ann;
+    }
+
+    return reference_repeating_regions;
 }
 
 void help() {
