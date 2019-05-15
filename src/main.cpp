@@ -116,7 +116,7 @@ int main(int argc, char** argv) {
     }
 
     if (input_paths.size() < 3) {
-        std::cerr << "[rattlesnake::] error: missing input file(s)!" << std::endl;
+        std::cerr << "[ratlesnake::] error: missing input file(s)!" << std::endl;
         help();
         return 1;
     }
@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
         sparser = bioparser::createParser<bioparser::FastqParser, Sequence>(
             input_paths[0]);
     } else {
-        std::cerr << "[rattlesnake::] error: file " << input_paths[0] <<
+        std::cerr << "[ratlesnake::] error: file " << input_paths[0] <<
             " has unsupported format extension (valid extensions: .fasta, "
             ".fasta.gz, .fa, .fa.gz, .fastq, .fastq.gz, .fq, .fq.gz)!" <<
         std::endl;
@@ -145,7 +145,7 @@ int main(int argc, char** argv) {
         oparser = bioparser::createParser<bioparser::PafParser, Overlap>(
             input_paths[1]);
     } else {
-        std::cerr << "[rattlesnake::] error: file " << input_paths[1] <<
+        std::cerr << "[ratlesnake::] error: file " << input_paths[1] <<
             " has unsupported format extension (valid extensions: .fasta, "
             ".fasta.gz, .fa, .fa.gz, .fastq, .fastq.gz, .fq, .fq.gz)!" <<
         std::endl;
@@ -163,7 +163,7 @@ int main(int argc, char** argv) {
         rparser = bioparser::createParser<bioparser::FastqParser, Sequence>(
             input_paths[2]);
     } else {
-        std::cerr << "[rattlesnake::] error: file " << input_paths[2] <<
+        std::cerr << "[ratlesnake::] error: file " << input_paths[2] <<
             " has unsupported format extension (valid extensions: .fasta, "
             ".fasta.gz, .fa, .fa.gz, .fastq, .fastq.gz, .fq, .fq.gz)!" <<
         std::endl;
@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
 
 void help() {
     std::cout <<
-        "usage: rattlesnake [options ...] <sequences> <overlaps> <reference>\n"
+        "usage: ratlesnake [options ...] <sequences> <overlaps> <reference>\n"
         "\n"
         "    <sequences>\n"
         "        input file in FASTA/FASTQ format (can be compressed with gzip)\n"
