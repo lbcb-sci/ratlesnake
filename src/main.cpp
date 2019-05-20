@@ -330,9 +330,9 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annota
         std::vector<uint64_t> chimeric_annotations;
         for(int i = 0; i < (itr->second).size() - 1; i++) {
             if((itr->second)[i].seq_start != (itr->second)[i+1].seq_start && (itr->second)[i].seq_end != (itr->second)[i+1].seq_end){
-                uint64_t positions = (itr->second)[i].seq_start;
+                uint64_t positions = (itr->second)[i].seq_end;
                 positions = positions << 32;
-                positions = positions + (itr->second)[i+1].seq_end;
+                positions = positions | (itr->second)[i+1].seq_start;
                 chimeric_annotations.push_back(positions);
 
             }
@@ -343,7 +343,7 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annota
 
     for(auto itr = repeating_reads.begin(); itr != repeating_reads.end(); itr++) {
         Annotation ann = dst[itr->first];
-        std::vector<uint64_t> repeating__annotations;
+        std::vector<uint64_t> repeating_annotations;
         int i = 1;
         if ((itr->second[0]).seq_start == (itr->second[1]).seq_start && (itr->second[0]).seq_end == (itr->second[1]).seq_end) {
             i = 0;
@@ -351,13 +351,13 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annota
         while(i < (itr->second).size()) {
             uint64_t positions = (itr->second)[i].seq_start;
             positions = positions << 32;
-            positions = positions + (itr->second)[i].seq_end;
-            if(std::find(repeating__annotations.begin(), repeating__annotations.end(), positions) == repeating__annotations.end()) {
-                repeating__annotations.push_back(positions);
+            positions = positions | (itr->second)[i].seq_end;
+            if(std::find(repeating_annotations.begin(), repeating_annotations.end(), positions) == repeating_annotations.end()) {
+                repeating_annotations.push_back(positions);
             }
             i++;
         }
-        ann.repeat = repeating__annotations;
+        ann.repeat = repeating_annotations;
         dst[itr->first] = ann;
     }
 
@@ -386,7 +386,7 @@ bool paf_unique(const std::unique_ptr<Overlap>& a, const std::unique_ptr<Overlap
 void clear_contained_reads(std::vector<std::unique_ptr<Overlap>> &overlaps, std::vector<Annotation>& dst) {
     std::vector<std::unique_ptr<Overlap>>::iterator it = overlaps.begin();
     auto long_cmp = [](const std::unique_ptr<Overlap>& a, const std::unique_ptr<Overlap>& b) {
-        if (a->t_id == b->t_id) { 
+        if (a->t_id == b->t_id) {
             return (a->t_end - a->t_begin > b->t_end - b->t_begin);
         }
         return (a->t_id > b->t_id);
@@ -395,7 +395,7 @@ void clear_contained_reads(std::vector<std::unique_ptr<Overlap>> &overlaps, std:
     it = std::unique (overlaps.begin(), overlaps.end(), paf_unique);
     overlaps.resize(std::distance(overlaps.begin(), it));
     auto start_cmp = [](const std::unique_ptr<Overlap>& a, const std::unique_ptr<Overlap>& b) {
-        if (a->t_id == b->t_id) { 
+        if (a->t_id == b->t_id) {
             if (a->t_begin == b->t_begin) {
                 return (a->t_end > b->t_end);
             }
