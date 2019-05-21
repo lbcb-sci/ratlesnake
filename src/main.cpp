@@ -407,18 +407,22 @@ void clear_contained_reads(std::vector<std::unique_ptr<Overlap>> &overlaps, std:
     it = overlaps.begin();
     std::vector<std::unique_ptr<Overlap>>::iterator next;
     std::vector<std::unique_ptr<Overlap>>::iterator to_remove;
-    uint64_t r1, r2;
-    int s, e;
-    uint64_t id;
     while (it != --overlaps.end()) {
-        s = (*it)->t_begin;
-        e = (*it)->t_end;
-        id = (*it)->t_id;
-        overlaps.erase(std::remove_if(it+1, overlaps.end(), [&s, &e, &id](std::unique_ptr<Overlap> &p){return p->t_begin >= s && p->t_end <= e && p->t_id == id;}), overlaps.end());
-        if (it != --overlaps.end()) {
-            it++;
+        do {next = std::next(it);} while ((*next) == NULL);
+        while ((*next)->t_end <= (*it)->t_end) {
+            to_remove = next;
+            do {
+                next++;
+            } while ((*next) == NULL && next != overlaps.end());
+            (*to_remove) = NULL;
+            if(next == overlaps.end()) {
+                overlaps.erase(std::remove_if(overlaps.begin(), overlaps.end(), [](std::unique_ptr<Overlap> &p) {return p == NULL;}), overlaps.end());
+                return;
+            }
         }
+        it = next;
     }
+    overlaps.erase(std::remove_if(overlaps.begin(), overlaps.end(), [](std::unique_ptr<Overlap> &p) {return p == NULL;}), overlaps.end());
 }
 
 std::unordered_map<std::uint64_t, std::vector<Vertex*>> create_graph(std::vector<Vertex> &vertices, std::vector<std::unique_ptr<Overlap>> &overlaps) {
