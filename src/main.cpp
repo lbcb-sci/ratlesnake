@@ -229,6 +229,8 @@ struct Mapping {
     { }
 };
 
+std::unordered_map<std::uint64_t, std::vector<std::tuple<uint32_t, uint32_t>>> find_repeating_regions(std::vector<Mapping>& repeats);
+
 bool sort_paf(const std::unique_ptr<Overlap>& s1, const std::unique_ptr<Overlap>& s2) {
     if (s1->q_id == s2->q_id) {
         if(s1->q_begin == s2->q_begin) {
@@ -239,7 +241,7 @@ bool sort_paf(const std::unique_ptr<Overlap>& s1, const std::unique_ptr<Overlap>
     return (s1->q_id < s2->q_id);
 }
 
-bool sort_reference_repeating_sections(std::pair<std::uint64_t, std::uint64_t>& p1, std::pair<std::uint64_t, std::uint64_t>& p2) {
+/*bool sort_reference_repeating_sections(std::pair<std::uint64_t, std::uint64_t>& p1, std::pair<std::uint64_t, std::uint64_t>& p2) {
     if (std::get<0>(p1) == std::get<0>(p2)) {
         return std::get<1>(p1) > std::get<1>(p2);
     }
@@ -248,6 +250,10 @@ bool sort_reference_repeating_sections(std::pair<std::uint64_t, std::uint64_t>& 
 
 bool unique_reference_repeating_sections(std::pair<std::uint64_t, std::uint64_t>& p1, std::pair<std::uint64_t, std::uint64_t>& p2){
     return (std::get<0>(p1) == std::get<0>(p2) && std::get<1>(p1) == std::get<1>(p2));
+}*/
+
+bool repeats_by_length(Mapping& m1, Mapping& m2) {
+    return ((m1.gen_end - m1.gen_start) > (m2.gen_end - m2.gen_start));
 }
 
 std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annotation>& dst,
@@ -299,31 +305,23 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annota
                 }
                 all_repeatings.insert(all_repeatings.end(), (itr->second).begin() + i, (itr->second).end());
                 repeating_reads[itr->first] = itr->second;
-                repeatings.emplace(itr->first);
             }
         }
     }
 
-    std::vector<std::pair<std::uint64_t, std::uint64_t>> reference_repeating_regions;
+    std::sort(all_repeatings.begin(), all_repeatings.end(), repeats_by_length);
+    std::unordered_map<std::uint64_t, std::vector<std::tuple<uint32_t, uint32_t>>> reference_repeating_regions = find_repeating_regions(all_repeatings);
 
-    for (int i = 0; i < all_repeatings.size(); i++) {
-        for(int j = 0; j < all_repeatings.size(); j++) {
-            if (all_repeatings[i].ref_id == all_repeatings[j].ref_id &&  i != j) {
-                if (abs((int)(all_repeatings[i].gen_start - all_repeatings[j].gen_start)) + abs((int)(all_repeatings[i].gen_end - all_repeatings[j].gen_end)) < 1000) {
-                    std::uint64_t position = all_repeatings[i].gen_start;
-                    position = position << 32;
-                    position += all_repeatings[i].gen_end;
-                    reference_repeating_regions.push_back(std::make_pair(all_repeatings[i].ref_id, position));
-                }
-            }
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> ref_regions;
+    for (auto regions_it = reference_repeating_regions.begin(); regions_it != reference_repeating_regions.end(); regions_it++) {
+        std::vector<std::tuple<uint32_t, uint32_t>> reps = reference_repeating_regions[regions_it->first];
+        for (int i = 0; i < reps.size(); i++) {
+            std::uint64_t positions = std::get<0>(reps[i]);
+            positions = positions << 32;
+            positions = positions | std::get<1>(reps[i]);
+            ref_regions.push_back(std::make_pair(regions_it->first, positions));
         }
     }
-
-
-    std::sort(reference_repeating_regions.begin(), reference_repeating_regions.end(), sort_reference_repeating_sections);
-    std::vector<std::pair<std::uint64_t, std::uint64_t>>::iterator vec_it;
-    vec_it = std::unique(reference_repeating_regions.begin(), reference_repeating_regions.end(), unique_reference_repeating_sections);
-    reference_repeating_regions.resize(std::distance(reference_repeating_regions.begin(), vec_it));
 
     for(auto itr = chimeric_reads.begin(); itr != chimeric_reads.end(); itr++) {
         Annotation ann = dst[itr->first];
@@ -361,7 +359,7 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annota
         dst[itr->first] = ann;
     }
 
-    return reference_repeating_regions;
+    return ref_regions;
 }
 
 std::vector<Vertex*> DepthFirstSearch(std::unordered_map<std::uint64_t, std::vector<Vertex*>> heads);
@@ -504,6 +502,32 @@ void statistics(std::vector<Vertex*> ends) {
         fprintf(stderr, "Genome coverage: %f%%\n", (last_index - curr->read.t_begin) / (float) end->read.t_length * 100);
         fprintf(stderr, "Number of used reads: %d\n", count);
     }
+}
+
+std::unordered_map<std::uint64_t, std::vector<std::tuple<uint32_t, uint32_t>>> find_repeating_regions(std::vector<Mapping>& repeats) {
+    std::unordered_map<std::uint64_t, std::vector<std::tuple<uint32_t, uint32_t>>> return_map;
+    for (int i = 0; i < repeats.size() - 1; i++) {
+        //std::cout << repeats[i].gen_start << "\t" << repeats[i].gen_end << "\t" << repeats[i].seq_start << "\t" << repeats[i].seq_end << std::endl;
+        for (int j = i + 1;  j < repeats.size(); j++) {
+            if (repeats[i].ref_id == repeats[j].ref_id) {
+                if (repeats[i].gen_start <= repeats[j].gen_start && repeats[i].gen_end >= repeats[j].gen_end && std::find((return_map[repeats[i].ref_id]).begin(),
+                (return_map[repeats[i].ref_id]).end(), std::make_tuple(repeats[i].gen_start, repeats[i].gen_end)) == (return_map[repeats[i].ref_id]).end()) {
+                    //std::cout << "Na i je " << repeats[i].gen_start << "\t" << repeats[i].gen_end << "\t" << repeats[i].seq_start << "\t" << repeats[i].seq_end << std::endl;
+                    //std::cout << "Na j je " << repeats[j].gen_start << "\t" << repeats[j].gen_end << "\t" << repeats[j].seq_start << "\t" << repeats[j].seq_end << "\n" << std::endl;
+                    if (return_map.find(repeats[j].ref_id) == return_map.end()){
+                        std::vector<std::tuple<uint32_t, uint32_t>> vec;
+                        vec.push_back(std::make_tuple(repeats[j].gen_start, repeats[j].gen_end));
+                        return_map[repeats[j].ref_id] = vec;
+                    } else {
+                        (return_map[repeats[j].ref_id]).push_back(std::make_tuple(repeats[j].gen_start, repeats[j].gen_end));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    return return_map;
 }
 
 void help() {
