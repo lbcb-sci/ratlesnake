@@ -11,10 +11,13 @@
 #include <set>
 
 #include "bioparser/bioparser.hpp"
+#include "thread_pool/thread_pool.hpp"
+#include "ram/ram.hpp"
 
-static const std::string version = "v0.0.0";
+static const std::string version = "v0.0.1";
 
 static struct option options[] = {
+    {"threads", required_argument, nullptr, 't'},
     {"version", no_argument, nullptr, 'v'},
     {"help", no_argument, nullptr, 'h'},
     {nullptr, 0, nullptr, 0}
@@ -22,119 +25,60 @@ static struct option options[] = {
 
 void help();
 
-struct Sequence {
-    Sequence(const char* name, std::uint32_t name_length,
-        const char* data, std::uint32_t data_length)
-            : name(name, name_length), data(data, data_length) {
-    }
-
-    Sequence(const char* name, std::uint32_t name_length,
-        const char* data, std::uint32_t data_length,
-        const char*, std::uint32_t)
-            : Sequence(name, name_length, data, data_length) {
-    }
-
-    ~Sequence() {
-    }
-
-    std::string name;
-    std::string data;
-};
-
-struct Annotation {
-    Annotation() {
-    }
-    ~Annotation() {
-    }
-
-    std::uint64_t valid;
-    std::vector<std::uint64_t> inclusion;
-    std::vector<std::uint64_t> chimeric;
-    std::vector<std::uint64_t> repeat;
-};
-
-struct Overlap {
-    Overlap(
-        const char* q_name, std::uint32_t q_name_length,
-        std::uint32_t q_length,
-        std::uint32_t q_begin,
-        std::uint32_t q_end,
-        char orientation,
-        const char* t_name, std::uint32_t t_name_length,
-        std::uint32_t t_length,
-        std::uint32_t t_begin,
-        std::uint32_t t_end,
-        std::uint32_t,
-        std::uint32_t,
-        std::uint32_t)
-            : q_id(),
-            q_length(q_length),
-            q_begin(q_begin),
-            q_end(q_end),
-            t_id(),
-            t_length(t_length),
-            t_begin(t_begin),
-            t_end(t_end),
-            strand(orientation == '-') {
-
-        std::string q(q_name, q_name_length);
-        if (name_to_id.find(q) != name_to_id.end()) {
-            q_id = name_to_id[q];
-        } else {
-            q_id = name_to_id.size();
-            name_to_id[q] = name_to_id.size();
-        }
-
-        std::string t(t_name, t_name_length);
-        if (name_to_id.find(t) != name_to_id.end()) {
-            t_id = name_to_id[t];
-        } else {
-            t_id = name_to_id.size();
-            name_to_id[t] = name_to_id.size();
-        }
-    }
-
-    static std::unordered_map<std::string, std::uint32_t> name_to_id;
-
-    std::uint64_t q_id;
-    std::uint32_t q_length;
-    std::uint32_t q_begin;
-    std::uint32_t q_end;
-    std::uint64_t t_id;
-    std::uint32_t t_length;
-    std::uint32_t t_begin;
-    std::uint32_t t_end;
-    bool strand;
-};
-
-struct Vertex {
-    Vertex(Overlap read) : read(read) {}
-
-    Overlap read;
-    std::vector<Vertex*> vertices;
-    Vertex* parent = NULL;
-};
-
-std::unordered_map<std::string, std::uint32_t> Overlap::name_to_id;
-
 inline bool isSuffix(const std::string& src, const std::string& suffix) {
     return src.size() < suffix.size() ? false :
         src.compare(src.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annotation>& dst,
-    std::vector<std::unique_ptr<Overlap>>& overlaps);
+std::unique_ptr<bioparser::Parser<ram::Sequence>> createSequenceParser(
+    const std::string& path) {
 
-void reconstruct(std::vector<Annotation>& dst,
-    std::vector<std::unique_ptr<Overlap>>& overlaps);
+    if (isSuffix(path, ".fasta")    || isSuffix(path, ".fa") ||
+        isSuffix(path, ".fasta.gz") || isSuffix(path, ".fa.gz")) {
+        return bioparser::createParser<bioparser::FastaParser, ram::Sequence>(path);
+    }
+    if (isSuffix(path, ".fastq")    || isSuffix(path, ".fq") ||
+        isSuffix(path, ".fastq.gz") || isSuffix(path, ".fq.gz")) {
+        return bioparser::createParser<bioparser::FastqParser, ram::Sequence>(path);
+    }
+
+    std::cerr << "[ratlesnake::] error: file " << path
+              << " has unsupported format extension (valid extensions: .fasta, "
+              << ".fasta.gz, .fa, .fa.gz, .fastq, .fastq.gz, .fq, .fq.gz)!"
+              << std::endl;
+    return nullptr;
+}
+
+// void explore(std::vector<std::unique_ptr<ram::Sequence>>& src);
+
+// void transform(std::vector<std::unique_ptr<ram::Sequence>>& src);
+
+struct Annotation {
+    std::vector<std::uint64_t> inclusion_interval;
+    std::vector<std::uint64_t> chimeric_regions;
+    std::vector<std::uint64_t> repetitive_regions;
+};
+
+std::vector<Annotation> annotate(
+    const std::vector<std::unique_ptr<ram::Sequence>>& src,
+    const std::vector<std::unique_ptr<ram::Sequence>>& dst,
+    std::uint32_t num_threads);
+
+void reconstruct(const std::vector<Annotation>& annotations,
+    const std::vector<std::unique_ptr<ram::Sequence>>& src,
+    const std::vector<std::unique_ptr<ram::Sequence>>& dst,
+    std::uint32_t num_threads);
 
 int main(int argc, char** argv) {
+
+    std::uint32_t num_threads = 1;
 
     std::vector<std::string> input_paths;
 
     char argument;
-    while ((argument = getopt_long(argc, argv, "h", options, nullptr)) != -1) {
+    while ((argument = getopt_long(argc, argv, "t:h", options, nullptr)) != -1) {
         switch (argument) {
+            case 't': num_threads = atoi(optarg); break;
             case 'v': std::cout << version << std::endl; return 0;
             case 'h': help(); return 0;
             default: return 1;
@@ -145,408 +89,266 @@ int main(int argc, char** argv) {
         input_paths.emplace_back(argv[i]);
     }
 
-    if (input_paths.size() < 3) {
+    if (input_paths.size() < 2) {
         std::cerr << "[ratlesnake::] error: missing input file(s)!" << std::endl;
         help();
         return 1;
     }
 
-    std::unique_ptr<bioparser::Parser<Sequence>> sparser = nullptr;
-
-    if (isSuffix(input_paths[0], ".fasta") || isSuffix(input_paths[0], ".fa") ||
-        isSuffix(input_paths[0], ".fasta.gz") || isSuffix(input_paths[0], ".fa.gz")) {
-        sparser = bioparser::createParser<bioparser::FastaParser, Sequence>(
-            input_paths[0]);
-    } else if (isSuffix(input_paths[0], ".fastq") || isSuffix(input_paths[0], ".fq") ||
-               isSuffix(input_paths[0], ".fastq.gz") || isSuffix(input_paths[0], ".fq.gz")) {
-        sparser = bioparser::createParser<bioparser::FastqParser, Sequence>(
-            input_paths[0]);
-    } else {
-        std::cerr << "[ratlesnake::] error: file " << input_paths[0] <<
-            " has unsupported format extension (valid extensions: .fasta, "
-            ".fasta.gz, .fa, .fa.gz, .fastq, .fastq.gz, .fq, .fq.gz)!" <<
-        std::endl;
+    std::unique_ptr<bioparser::Parser<ram::Sequence>> sparser = createSequenceParser(input_paths[0]);
+    if (sparser == nullptr) {
         return 1;
     }
 
-    std::unique_ptr<bioparser::Parser<Overlap>> oparser = nullptr;
-
-    if (isSuffix(input_paths[1], ".paf") || isSuffix(input_paths[1], ".paf.gz")) {
-        oparser = bioparser::createParser<bioparser::PafParser, Overlap>(
-            input_paths[1]);
-    } else {
-        std::cerr << "[ratlesnake::] error: file " << input_paths[1] <<
-            " has unsupported format extension (valid extensions: .fasta, "
-            ".fasta.gz, .fa, .fa.gz, .fastq, .fastq.gz, .fq, .fq.gz)!" <<
-        std::endl;
+    std::unique_ptr<bioparser::Parser<ram::Sequence>> rparser = createSequenceParser(input_paths[1]);
+    if (rparser == nullptr) {
         return 1;
     }
 
-    std::unique_ptr<bioparser::Parser<Sequence>> rparser = nullptr;
+    std::vector<std::unique_ptr<ram::Sequence>> sequences;
+    sparser->parse(sequences, -1);
 
-    if (isSuffix(input_paths[2], ".fasta") || isSuffix(input_paths[2], ".fa") ||
-        isSuffix(input_paths[2], ".fasta.gz") || isSuffix(input_paths[2], ".fa.gz")) {
-        rparser = bioparser::createParser<bioparser::FastaParser, Sequence>(
-            input_paths[2]);
-    } else if (isSuffix(input_paths[2], ".fastq") || isSuffix(input_paths[2], ".fq") ||
-               isSuffix(input_paths[2], ".fastq.gz") || isSuffix(input_paths[2], ".fq.gz")) {
-        rparser = bioparser::createParser<bioparser::FastqParser, Sequence>(
-            input_paths[2]);
-    } else {
-        std::cerr << "[ratlesnake::] error: file " << input_paths[2] <<
-            " has unsupported format extension (valid extensions: .fasta, "
-            ".fasta.gz, .fa, .fa.gz, .fastq, .fastq.gz, .fq, .fq.gz)!" <<
-        std::endl;
-        return 1;
-    }
+    std::vector<std::unique_ptr<ram::Sequence>> references;
+    rparser->parse(references, -1);
 
-    std::vector<std::unique_ptr<Overlap>> overlaps;
-    oparser->parse(overlaps, -1);
+    auto annotations = annotate(sequences, references, num_threads);
 
-    std::vector<Annotation> annotations(Overlap::name_to_id.size());
-
-    auto ret = annotate(annotations, overlaps);
-    reconstruct(annotations, overlaps);
+    reconstruct(annotations, sequences, references, num_threads);
 
     return 0;
 }
 
-struct Mapping {
-    std::uint32_t seq_start;
-    std::uint32_t seq_end;
-    std::uint32_t gen_start;
-    std::uint32_t gen_end;
-    std::uint32_t gen_length;
-    std::uint64_t ref_id;
-
-    Mapping(std::uint32_t seq_s, std::uint32_t seq_e, std::uint32_t gen_s, std::uint32_t gen_e, std::uint32_t gen_l, std::uint64_t ref_n) :
-        seq_start(seq_s),
-        seq_end(seq_e),
-        gen_start(gen_s),
-        gen_end(gen_e),
-        gen_length(gen_l),
-        ref_id(ref_n)
-    { }
-};
-
-std::unordered_map<std::uint64_t, std::vector<std::tuple<uint32_t, uint32_t>>> find_repeating_regions(std::vector<Mapping>& repeats);
-
-bool sort_paf(const std::unique_ptr<Overlap>& s1, const std::unique_ptr<Overlap>& s2) {
-    if (s1->q_id == s2->q_id) {
-        if(s1->q_begin == s2->q_begin) {
-            return (s1->q_end > s2->q_end);
-        }
-        return (s1->q_begin < s2->q_begin);
-    }
-    return (s1->q_id < s2->q_id);
-}
-
-/*bool sort_reference_repeating_sections(std::pair<std::uint64_t, std::uint64_t>& p1, std::pair<std::uint64_t, std::uint64_t>& p2) {
-    if (std::get<0>(p1) == std::get<0>(p2)) {
-        return std::get<1>(p1) > std::get<1>(p2);
-    }
-    return std::get<0>(p1) < std::get<0>(p2);
-}
-
-bool unique_reference_repeating_sections(std::pair<std::uint64_t, std::uint64_t>& p1, std::pair<std::uint64_t, std::uint64_t>& p2){
-    return (std::get<0>(p1) == std::get<0>(p2) && std::get<1>(p1) == std::get<1>(p2));
-}*/
-
-bool repeats_by_length(Mapping& m1, Mapping& m2) {
-    return ((m1.gen_end - m1.gen_start) > (m2.gen_end - m2.gen_start));
-}
-
-std::vector<std::pair<std::uint64_t, std::uint64_t>> annotate(std::vector<Annotation>& dst,
-    std::vector<std::unique_ptr<Overlap>>& overlaps) {
-
-    std::sort(overlaps.begin(), overlaps.end(), sort_paf);
-
-    std::unordered_map<std::uint64_t, std::vector<Mapping>> sequence_mapping_details;
-
-    for(auto &i : overlaps) {
-        std::uint64_t key = i->q_id;
-        Mapping mapp(i->q_begin, i->q_end, i->t_begin, i->t_end, i->t_length, i->t_id);
-        if(sequence_mapping_details.find(key) == sequence_mapping_details.end()) {
-            std::vector<Mapping> vec;
-            vec.push_back(mapp);
-            sequence_mapping_details[key] = vec;
-        } else {
-            (sequence_mapping_details[key]).push_back(mapp);
-        }
-    }
-
-    std::unordered_map<std::uint64_t, std::vector<Mapping>> chimeric_reads;
-    std::unordered_map<std::uint64_t, std::vector<Mapping>> repeating_reads;
-    std::unordered_set<std::uint64_t> chimers;
-    std::unordered_set<std::uint64_t> repeatings;
-    std::vector<Mapping> all_repeatings;
-
-    for (auto itr = sequence_mapping_details.begin(); itr != sequence_mapping_details.end(); itr++) {
-        if ((itr->second).size() > 1) {
-            uint32_t seq_start = (itr->second)[0].seq_start;
-            uint32_t seq_end = (itr->second)[0].seq_end;
-            uint32_t gen_start = (itr->second)[0].gen_start;
-            uint32_t gen_end = (itr->second)[0].gen_end;
-            for (int i = 1; i < (itr->second).size(); i++) {
-                if (!(seq_start <= (itr->second)[i].seq_start && seq_end >= (itr->second)[i].seq_end)) {
-                    chimers.emplace(itr->first);
-                    int seq_gap = abs((int)(std::max(seq_start, (itr->second)[i].seq_start) - std::min(seq_end, (itr->second)[i].seq_end)));
-                    int ref_gap = abs((int)(std::max(gen_start, (itr->second)[i].gen_start) - std::min(seq_end, (itr->second)[i].seq_end)));
-                    if (std::min(gen_start, (itr->second)[i].gen_start) > 100 || std::max(gen_end, (itr->second)[i].gen_end) < ((itr->second)[i].gen_length - 100)
-                    && (std::min(ref_gap, seq_gap)/std::max(ref_gap, seq_gap)) > 0.12) {
-                        chimeric_reads[itr->first] = itr->second;
-                        break;
-                    }
-                }
-            } if (chimers.find(itr->first) == chimers.end()) {
-                int i = 1;
-                if ((itr->second)[0].seq_start == (itr->second)[1].seq_start && (itr->second)[0].seq_end == (itr->second)[1].seq_end) {
-                    i = 0;
-                }
-                all_repeatings.insert(all_repeatings.end(), (itr->second).begin() + i, (itr->second).end());
-                repeating_reads[itr->first] = itr->second;
-            }
-        }
-    }
-
-    std::sort(all_repeatings.begin(), all_repeatings.end(), repeats_by_length);
-    std::unordered_map<std::uint64_t, std::vector<std::tuple<uint32_t, uint32_t>>> reference_repeating_regions = find_repeating_regions(all_repeatings);
-
-    std::vector<std::pair<std::uint64_t, std::uint64_t>> ref_regions;
-    for (auto regions_it = reference_repeating_regions.begin(); regions_it != reference_repeating_regions.end(); regions_it++) {
-        std::vector<std::tuple<uint32_t, uint32_t>> reps = reference_repeating_regions[regions_it->first];
-        for (int i = 0; i < reps.size(); i++) {
-            std::uint64_t positions = std::get<0>(reps[i]);
-            positions = positions << 32;
-            positions = positions | std::get<1>(reps[i]);
-            ref_regions.push_back(std::make_pair(regions_it->first, positions));
-        }
-    }
-
-    for(auto itr = chimeric_reads.begin(); itr != chimeric_reads.end(); itr++) {
-        Annotation ann = dst[itr->first];
-        std::vector<uint64_t> chimeric_annotations;
-        for(int i = 0; i < (itr->second).size() - 1; i++) {
-            if((itr->second)[i].seq_start != (itr->second)[i+1].seq_start && (itr->second)[i].seq_end != (itr->second)[i+1].seq_end){
-                uint64_t positions = (itr->second)[i].seq_end;
-                positions = positions << 32;
-                positions = positions | (itr->second)[i+1].seq_start;
-                chimeric_annotations.push_back(positions);
-
-            }
-        }
-        ann.chimeric = chimeric_annotations;
-        dst[itr->first] = ann;
-    }
-
-    for(auto itr = repeating_reads.begin(); itr != repeating_reads.end(); itr++) {
-        Annotation ann = dst[itr->first];
-        std::vector<uint64_t> repeating_annotations;
-        int i = 1;
-        if ((itr->second[0]).seq_start == (itr->second[1]).seq_start && (itr->second[0]).seq_end == (itr->second[1]).seq_end) {
-            i = 0;
-        }
-        while(i < (itr->second).size()) {
-            uint64_t positions = (itr->second)[i].seq_start;
-            positions = positions << 32;
-            positions = positions | (itr->second)[i].seq_end;
-            if(std::find(repeating_annotations.begin(), repeating_annotations.end(), positions) == repeating_annotations.end()) {
-                repeating_annotations.push_back(positions);
-            }
-            i++;
-        }
-        ann.repeat = repeating_annotations;
-        dst[itr->first] = ann;
-    }
-
-    return ref_regions;
-}
-
-std::vector<Vertex*> DepthFirstSearch(std::unordered_map<std::uint64_t, std::vector<Vertex*>> heads);
-void clear_contained_reads(std::vector<std::unique_ptr<Overlap>> &overlaps, std::vector<Annotation>& dst);
-std::unordered_map<std::uint64_t, std::vector<Vertex*>> create_graph(std::vector<Vertex> &vertices, std::vector<std::unique_ptr<Overlap>> &overlaps);
-void statistics(std::vector<Vertex*> ends);
-
-void reconstruct(std::vector<Annotation>& dst,
-    std::vector<std::unique_ptr<Overlap>>& overlaps) {
-    clear_contained_reads(overlaps, dst);
-    //remove_covered_repeats(repeats, paf_objects);
-    std::vector<Vertex> vertices;
-    std::unordered_map<std::uint64_t, std::vector<Vertex*>> heads = create_graph(vertices, overlaps);
-    std::vector<Vertex*> ends = DepthFirstSearch(heads);
-    statistics(ends);
-}
-
-bool paf_unique(const std::unique_ptr<Overlap>& a, const std::unique_ptr<Overlap>& b) {
-    return a->q_id == b->q_id;
-}
-
-void clear_contained_reads(std::vector<std::unique_ptr<Overlap>> &overlaps, std::vector<Annotation>& dst) {
-    std::vector<std::unique_ptr<Overlap>>::iterator it = overlaps.begin();
-    auto long_cmp = [](const std::unique_ptr<Overlap>& a, const std::unique_ptr<Overlap>& b) {
-        if (a->t_id == b->t_id) {
-            return (a->t_end - a->t_begin > b->t_end - b->t_begin);
-        }
-        return (a->t_id > b->t_id);
-    };
-    std::sort(overlaps.begin(), overlaps.end(), long_cmp);
-    it = std::unique (overlaps.begin(), overlaps.end(), paf_unique);
-    overlaps.resize(std::distance(overlaps.begin(), it));
-    auto start_cmp = [](const std::unique_ptr<Overlap>& a, const std::unique_ptr<Overlap>& b) {
-        if (a->t_id == b->t_id) {
-            if (a->t_begin == b->t_begin) {
-                return (a->t_end > b->t_end);
-            }
-            return (a->t_begin < b->t_begin);
-        }
-        return (a->t_id > b->t_id);
-    };
-    std::sort(overlaps.begin(), overlaps.end(), start_cmp);
-    it = overlaps.begin();
-    std::vector<std::unique_ptr<Overlap>>::iterator next;
-    std::vector<std::unique_ptr<Overlap>>::iterator to_remove;
-    while (it != --overlaps.end()) {
-        do {next = std::next(it);} while ((*next) == NULL);
-        while ((*next)->t_end <= (*it)->t_end) {
-            to_remove = next;
-            do {
-                next++;
-            } while ((*next) == NULL && next != overlaps.end());
-            (*to_remove) = NULL;
-            if(next == overlaps.end()) {
-                overlaps.erase(std::remove_if(overlaps.begin(), overlaps.end(), [](std::unique_ptr<Overlap> &p) {return p == NULL;}), overlaps.end());
-                return;
-            }
-        }
-        it = next;
-    }
-    overlaps.erase(std::remove_if(overlaps.begin(), overlaps.end(), [](std::unique_ptr<Overlap> &p) {return p == NULL;}), overlaps.end());
-}
-
-std::unordered_map<std::uint64_t, std::vector<Vertex*>> create_graph(std::vector<Vertex> &vertices, std::vector<std::unique_ptr<Overlap>> &overlaps) {
-    for (auto const& overlap: overlaps) {
-        vertices.emplace_back(Vertex(*overlap));
-    }
-    std::vector<Vertex>::iterator it = vertices.begin();
-    std::vector<Vertex>::iterator next;
-    std::vector<Vertex*> heads;
-    std::unordered_map<std::uint64_t, std::vector<Vertex*>> re;
-    heads.emplace_back(&(*it));
-    while(it != --vertices.end()) {
-        next = std::next(it);
-        if ((*next).read.t_id != (*it).read.t_id) {
-            re[(*it).read.t_id] = heads;
-            heads.clear();
-            heads.emplace_back(&(*next));
-            it++;
-            continue;
-        }
-        while ((*next).read.t_begin <= (*it).read.t_end && (*next).read.t_id == (*it).read.t_id) {
-            it->vertices.emplace_back(&(*next));
-            next++;
-            if(next == vertices.end()) break;
-        }
-        if (next == std::next(it) && (*next).read.t_id == (*std::next(it)).read.t_id) heads.emplace_back(&(*next));
-        it++;
-    }
-    re[(*it).read.t_id] = heads;
-    heads.clear();
-    for (auto const& vertex : vertices) {
-        printf("S\t%llu\t%c\tLN:i:%u\n", vertex.read.q_id, '*', vertex.read.q_length);
-        for (auto const& next: vertex.vertices) {
-            printf("L\t%llu\t%c\t%llu\t%c\t%c\n", vertex.read.q_id, '+', next->read.q_id, '-', '*');
-        }
-    }
-    return re;
-}
-
-std::vector<Vertex*> DepthFirstSearch(std::unordered_map<std::uint64_t, std::vector<Vertex*>> heads) {
-    Vertex* max;
-    Vertex* head;
-    Vertex* longest;
-    std::vector<Vertex*> ends;
-    int begin;
-    for (auto const& seq: heads) {
-        unsigned int length=0;
-        for (unsigned int i = 0; i < seq.second.size(); i++) {
-            head = seq.second[i];
-            begin = head->read.t_begin;
-            while(!head->vertices.empty()) {
-                max = head->vertices[0];
-                for (auto const& vertex : head->vertices) {
-                    if (vertex->read.t_begin > max->read.t_begin) max = vertex;
-                }
-                max->parent = head;
-                head = max;
-            }
-            if (length < head->read.t_begin - begin) {
-                length = head->read.t_begin - begin;
-                longest = head;
-            }
-        }
-        ends.emplace_back(longest);
-    }
-    return ends;
-}
-
-void statistics(std::vector<Vertex*> ends) {
-    int count, last_index;
-    for (auto const& end: ends) {
-        count = 1;
-        auto curr = end;
-        last_index = end->read.t_end;
-        while (curr->parent != NULL) {
-            count++;
-            curr = curr->parent;
-        }
-        fprintf(stderr, "Genome coverage: %f%%\n", (last_index - curr->read.t_begin) / (float) end->read.t_length * 100);
-        fprintf(stderr, "Number of used reads: %d\n", count);
-    }
-}
-
-std::unordered_map<std::uint64_t, std::vector<std::tuple<uint32_t, uint32_t>>> find_repeating_regions(std::vector<Mapping>& repeats) {
-    std::unordered_map<std::uint64_t, std::vector<std::tuple<uint32_t, uint32_t>>> return_map;
-    for (int i = 0; i < repeats.size() - 1; i++) {
-        //std::cout << repeats[i].gen_start << "\t" << repeats[i].gen_end << "\t" << repeats[i].seq_start << "\t" << repeats[i].seq_end << std::endl;
-        for (int j = i + 1;  j < repeats.size(); j++) {
-            if (repeats[i].ref_id == repeats[j].ref_id) {
-                if (repeats[i].gen_start <= repeats[j].gen_start && repeats[i].gen_end >= repeats[j].gen_end && std::find((return_map[repeats[i].ref_id]).begin(),
-                (return_map[repeats[i].ref_id]).end(), std::make_tuple(repeats[i].gen_start, repeats[i].gen_end)) == (return_map[repeats[i].ref_id]).end()) {
-                    //std::cout << "Na i je " << repeats[i].gen_start << "\t" << repeats[i].gen_end << "\t" << repeats[i].seq_start << "\t" << repeats[i].seq_end << std::endl;
-                    //std::cout << "Na j je " << repeats[j].gen_start << "\t" << repeats[j].gen_end << "\t" << repeats[j].seq_start << "\t" << repeats[j].seq_end << "\n" << std::endl;
-                    if (return_map.find(repeats[j].ref_id) == return_map.end()){
-                        std::vector<std::tuple<uint32_t, uint32_t>> vec;
-                        vec.push_back(std::make_tuple(repeats[j].gen_start, repeats[j].gen_end));
-                        return_map[repeats[j].ref_id] = vec;
-                    } else {
-                        (return_map[repeats[j].ref_id]).push_back(std::make_tuple(repeats[j].gen_start, repeats[j].gen_end));
-                    }
-                    break;
-                }
-            }
-        }
-    }
-
-    return return_map;
-}
-
 void help() {
     std::cout <<
-        "usage: ratlesnake [options ...] <sequences> <overlaps> <reference>\n"
+        "usage: ratlesnake [options ...] <sequences> <reference>\n"
         "\n"
         "    <sequences>\n"
         "        input file in FASTA/FASTQ format (can be compressed with gzip)\n"
-        "        containing third generation sequences\n"
-        "    <overlaps>\n"
-        "        input file in PAF format (can be compressed with gzip)\n"
-        "        containing overlaps between sequences and reference\n"
+        "        containing sequences\n"
         "    <reference>\n"
         "        input file in FASTA/FASTQ format (can be compressed with gzip)\n"
-        "        containing the reference genome\n"
+        "        containing a reference genome\n"
         "\n"
         "    options:\n"
+        "        -t, --threads <int>\n"
+        "            default: 1\n"
+        "            number of threads\n"
         "        --version\n"
         "            prints the version number\n"
         "        -h, --help\n"
         "            prints the usage\n";
+}
+
+std::vector<Annotation> annotate(
+    const std::vector<std::unique_ptr<ram::Sequence>>& src,
+    const std::vector<std::unique_ptr<ram::Sequence>>& dst,
+    std::uint32_t num_threads) {
+
+    auto thread_pool = thread_pool::createThreadPool(num_threads);
+
+    std::vector<Annotation> annotations(src.size() + dst.size());
+
+    ram::MinimizerEngine minimizer_engine(15, 5, num_threads);
+    minimizer_engine.minimize(dst.begin(), dst.end());
+    minimizer_engine.filter(0.001);
+
+    std::vector<std::future<std::vector<ram::Overlap>>> thread_futures;
+    for (std::uint32_t i = 0; i < src.size(); ++i) {
+        thread_futures.emplace_back(thread_pool->submit(
+            [&] (std::uint32_t i) -> std::vector<ram::Overlap> {
+                auto overlaps = minimizer_engine.map(src[i], false, false);
+                std::vector<ram::Overlap> repetitive_overlaps;
+                if (overlaps.size() < 2) {
+                    return repetitive_overlaps;
+                }
+
+                std::sort(overlaps.begin(), overlaps.end(),
+                    [] (const ram::Overlap& lhs, const ram::Overlap& rhs) -> bool {
+                        return lhs.q_begin < rhs.q_begin ||
+                            (lhs.q_begin == rhs.q_begin && lhs.q_end > rhs.q_end);
+                    });
+
+                // annotate chimeric regions
+                std::uint32_t k = 0;
+                for (std::uint32_t j = 1; j < overlaps.size(); ++j) {
+                    if (overlaps[k].q_end < overlaps[j].q_end) {
+                        bool is_chimeric = true;
+                        if (overlaps[k].t_id == overlaps[j].t_id) {
+                            std::uint32_t q_gap = abs(overlaps[j].q_begin - overlaps[k].q_end);
+                            std::uint32_t t_gap = abs(overlaps[j].t_begin - overlaps[k].t_end);
+                            is_chimeric &= std::min(q_gap, t_gap) <
+                                0.88 * std::max(q_gap, t_gap);
+                        }
+                        if (is_chimeric) {
+                            annotations[src[i]->id].chimeric_regions.emplace_back(
+                                overlaps[j].q_begin > overlaps[k].q_end ?
+                                (static_cast<uint64_t>(overlaps[k].q_end) << 32 | overlaps[j].q_begin) :
+                                (static_cast<uint64_t>(overlaps[j].q_begin) << 32 | overlaps[k].q_end));
+                        }
+                        k = j;
+                    } else {
+                        repetitive_overlaps.emplace_back(overlaps[j]);
+                    }
+                }
+
+                if (repetitive_overlaps.empty()) {
+                    return repetitive_overlaps;
+                }
+
+                // annotate repetitive regions
+                k = 0;
+                std::uint32_t q_end = repetitive_overlaps[k].q_end;
+                for (std::uint32_t j = 1; j < repetitive_overlaps.size(); ++j) {
+                    if (q_end < repetitive_overlaps[j].q_begin) {
+                        annotations[src[i]->id].repetitive_regions.emplace_back(
+                            static_cast<uint64_t>(repetitive_overlaps[k].q_begin) << 32 | q_end);
+                        k = j;
+                    }
+                    q_end = std::max(q_end, repetitive_overlaps[j].q_end);
+                }
+                annotations[src[i]->id].repetitive_regions.emplace_back(
+                    static_cast<uint64_t>(repetitive_overlaps[k].q_begin) << 32 | q_end);
+
+                return repetitive_overlaps;
+            }
+        , i));
+    }
+
+    std::vector<ram::Overlap> repetitive_overlaps;
+    for (std::uint32_t i = 0; i < thread_futures.size(); ++i) {
+        thread_futures[i].wait();
+        auto overlaps = thread_futures[i].get();
+        repetitive_overlaps.insert(repetitive_overlaps.end(), overlaps.begin(),
+            overlaps.end());
+    }
+
+    if (repetitive_overlaps.empty()) {
+        return annotations;
+    }
+
+    // annotate repetitive regions on references
+    std::sort(repetitive_overlaps.begin(), repetitive_overlaps.end(),
+        [] (const ram::Overlap& lhs, const ram::Overlap& rhs) -> bool {
+            return lhs.t_id < rhs.t_id ||
+                (lhs.t_id == rhs.t_id && lhs.t_begin < rhs.t_begin) ||
+                (lhs.t_id == rhs.t_id && lhs.t_begin == rhs.t_begin && lhs.t_end > rhs.t_end);
+        });
+
+    std::uint32_t j = 0;
+    std::uint32_t t_end = repetitive_overlaps[j].q_end;
+    for (std::uint32_t i = 1; i < repetitive_overlaps.size(); ++i) {
+        if (repetitive_overlaps[i - 1].t_id != repetitive_overlaps[i].t_id ||
+            t_end < repetitive_overlaps[i].t_begin) {
+
+            annotations[repetitive_overlaps[i - 1].t_id].repetitive_regions.emplace_back(
+                static_cast<uint64_t>(repetitive_overlaps[j].t_begin) << 32 | t_end);
+            j = i;
+            t_end = repetitive_overlaps[i].t_end;
+        } else {
+            t_end = std::max(t_end, repetitive_overlaps[i].t_end);
+        }
+    }
+    annotations[repetitive_overlaps[j].t_id].repetitive_regions.emplace_back(
+        static_cast<uint64_t>(repetitive_overlaps[j].t_begin) << 32 | t_end);
+
+    return annotations;
+}
+
+void reconstruct(const std::vector<Annotation>& annotations,
+    const std::vector<std::unique_ptr<ram::Sequence>>& src,
+    const std::vector<std::unique_ptr<ram::Sequence>>& dst,
+    std::uint32_t num_threads) {
+
+    auto thread_pool = thread_pool::createThreadPool(num_threads);
+
+    ram::MinimizerEngine minimizer_engine(15, 5, num_threads);
+    minimizer_engine.minimize(dst.begin(), dst.end());
+    minimizer_engine.filter(0.001);
+
+    std::vector<std::future<ram::Overlap>> thread_futures;
+    for (std::uint32_t i = 0; i < src.size(); ++i) {
+        thread_futures.emplace_back(thread_pool->submit(
+            [&] (std::uint32_t i) -> ram::Overlap {
+                auto overlaps = minimizer_engine.map(src[i], false, false);
+                if (overlaps.empty()) {
+                    return ram::Overlap(-1, -1, -1, -1, -1, -1);
+                }
+                std::sort(overlaps.begin(), overlaps.end(),
+                    [] (const ram::Overlap& lhs, const ram::Overlap& rhs) -> bool {
+                        return lhs.q_end - lhs.q_begin > rhs.q_end - rhs.q_begin;
+                    });
+                return overlaps.front();
+            }
+        , i));
+    }
+
+    std::vector<std::uint64_t> sources;
+    std::vector<ram::Overlap> overlaps;
+    for (std::uint32_t i = 0; i < thread_futures.size(); ++i) {
+        thread_futures[i].wait();
+        auto overlap = thread_futures[i].get();
+        if (overlap.t_id != -1ULL) {
+            sources.emplace_back(src[i]->id);
+            overlaps.emplace_back(overlap);
+        }
+    }
+
+    // remove contained reads
+    // TODO: sort sources!
+    std::sort(overlaps.begin(), overlaps.end(),
+        [] (const ram::Overlap& lhs, const ram::Overlap& rhs) -> bool {
+            return lhs.t_id < rhs.t_id ||
+                (lhs.t_id == rhs.t_id && lhs.t_begin < rhs.t_begin) ||
+                (lhs.t_id == rhs.t_id && lhs.t_begin == rhs.t_begin && lhs.t_end > rhs.t_end);
+        });
+
+    for (std::uint32_t i = 0; i < overlaps.size(); ++i) {
+        for (std::uint32_t j = i + 1; j < overlaps.size(); ++j) {
+            if (overlaps[i].t_id != overlaps[j].t_id ||
+                overlaps[i].t_end < overlaps[j].t_end) {
+                i = j - 1;
+                break;
+            }
+            sources[j] = -1;
+        }
+    }
+
+    {
+        std::vector<uint64_t> s;
+        std::vector<ram::Overlap> o;
+        for (std::uint32_t i = 0; i < overlaps.size(); ++i) {
+            if (sources[i] != -1ULL) {
+                s.emplace_back(sources[i]);
+                o.emplace_back(overlaps[i]);
+            }
+        }
+        s.swap(sources);
+        o.swap(overlaps);
+    }
+
+    // create assembly graph
+    using Node = std::vector<std::pair<std::uint64_t, std::uint32_t>>;
+    std::vector<Node> nodes(src.size());
+
+    for (std::uint32_t i = 0; i < overlaps.size(); ++i) {
+        std::cout << "S\t" << src[sources[i]]->name << "\t"
+                  << src[sources[i]]->data << "\tLN:i:"
+                  << src[sources[i]]->data.size() << "\tRC:i:1" << std::endl;
+        for (std::uint32_t j = i + 1; j < overlaps.size(); ++j) {
+            if (overlaps[i].t_id != overlaps[j].t_id ||
+                overlaps[i].t_end < overlaps[j].t_begin) {
+                break;
+            }
+            nodes[i].emplace_back(sources[j], overlaps[i].t_end - overlaps[j].t_begin);
+            std::cout << "L\t" << src[sources[i]]->name << "\t"
+                      << (overlaps[i].strand ? "+\t" : "-\t")
+                      << src[sources[j]]->name << "\t"
+                      << (overlaps[j].strand ? "+\t" : "-\t")
+                      << overlaps[i].t_end - overlaps[j].t_begin << "M" << std::endl;
+        }
+    }
+
+    for (const auto& it: nodes) {
+
+    }
 }

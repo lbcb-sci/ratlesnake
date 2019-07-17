@@ -15,10 +15,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if (NOT TARGET bioparser)
     add_subdirectory(vendor/bioparser EXCLUDE_FROM_ALL)
 endif()
+if (NOT TARGET ram)
+    add_subdirectory(vendor/ram EXCLUDE_FROM_ALL)
+endif()
 
 add_executable(ratlesnake
     src/main.cpp)
 
-target_link_libraries(ratlesnake bioparser)
+target_link_libraries(ratlesnake bioparser ram thread_pool)
 
 install(TARGETS ratlesnake DESTINATION ${CMAKE_INSTALL_LIBDIR})
