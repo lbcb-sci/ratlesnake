@@ -13,7 +13,7 @@
 #include "thread_pool/thread_pool.hpp"
 #include "ram/ram.hpp"
 
-static const std::string version = "v0.0.1";
+static const std::string version = "v0.0.2";
 
 static struct option options[] = {
     {"threads", required_argument, nullptr, 't'},
@@ -53,7 +53,7 @@ std::unique_ptr<bioparser::Parser<ram::Sequence>> createSequenceParser(
 // void transform(std::vector<std::unique_ptr<ram::Sequence>>& src);
 
 struct Annotation {
-    std::vector<std::uint64_t> inclusion_interval;
+    std::vector<std::uint64_t> inclusion_intervals;
     std::vector<std::uint64_t> chimeric_regions;
     std::vector<std::uint64_t> repetitive_regions;
 };
@@ -63,7 +63,7 @@ std::vector<Annotation> annotate(
     const std::vector<std::unique_ptr<ram::Sequence>>& dst,
     std::uint32_t num_threads);
 
-void reconstruct(const std::vector<Annotation>& annotations,
+void reconstruct(std::vector<Annotation>& annotations,
     const std::vector<std::unique_ptr<ram::Sequence>>& src,
     const std::vector<std::unique_ptr<ram::Sequence>>& dst,
     std::uint32_t num_threads);
@@ -253,7 +253,7 @@ std::vector<Annotation> annotate(
     return annotations;
 }
 
-void reconstruct(const std::vector<Annotation>& annotations,
+void reconstruct(std::vector<Annotation>& annotations,
     const std::vector<std::unique_ptr<ram::Sequence>>& src,
     const std::vector<std::unique_ptr<ram::Sequence>>& dst,
     std::uint32_t num_threads) {
@@ -311,7 +311,15 @@ void reconstruct(const std::vector<Annotation>& annotations,
                 i = j - 1;
                 break;
             }
-            sources[rank[j]] = -1;
+            annotations[sources[rank[j]]].inclusion_intervals.emplace_back(sources[rank[i]]);
+        }
+    }
+
+    for (std::uint32_t i = 0; i < overlaps.size(); ++i) {
+        if (annotations[sources[rank[i]]].inclusion_intervals.empty() == false) {
+            annotations[sources[rank[i]]].inclusion_intervals.emplace_back(
+                static_cast<std::uint64_t>(overlaps[rank[i]].q_begin) << 32 | overlaps[rank[i]].q_end);
+            sources[rank[i]] = -1;
         }
     }
 
@@ -330,30 +338,34 @@ void reconstruct(const std::vector<Annotation>& annotations,
     std::vector<Node> nodes(num_nodes);
     std::vector<std::uint64_t> rank_to_node(src.size());
 
-    std::ofstream gfa_s("ratlesnake.gfa");
-    std::ofstream fasta_s("ratlesnake_solid.fasta");
+    std::ofstream graph_s("ratlesnake.gfa");
+    std::ofstream solid_s("ratlesnake_solid.fasta");
 
     for (std::uint32_t i = 0, k = 0; i < overlaps.size(); ++i) {
         if (sources[rank[i]] == -1ULL) {
             continue;
         }
 
-        gfa_s << "S\t" << src[sources[rank[i]]]->name << "\t"
-              << "*" << "\t"
-              << "LN:i:" << src[sources[rank[i]]]->data.size() << "\t"
-              << "UR:Z:ratlesnake_solid.fasta"
-              << std::endl;
+        graph_s << "S\t" << src[sources[rank[i]]]->name << "\t"
+                << "*" << "\t"
+                << "LN:i:" << src[sources[rank[i]]]->data.size() << "\t"
+                << "UR:Z:ratlesnake_solid.fasta"
+                << std::endl;
 
-        fasta_s << ">" << src[sources[rank[i]]]->name
+        solid_s << ">" << src[sources[rank[i]]]->name
                 << " LN:i:" << src[sources[rank[i]]]->data.size()
                 << " XB:i:" << overlaps[rank[i]].q_begin
                 << " XE:i:" << overlaps[rank[i]].q_end;
+        for (const auto& it: annotations[sources[rank[i]]].chimeric_regions) {
+            solid_s << " YB:i:" << (it >> 32)
+                    << " YE:i:" << (it << 32 >> 32);
+        }
         for (const auto& it: annotations[sources[rank[i]]].repetitive_regions) {
-            fasta_s << " ZB:i:" << (it >> 32)
+            solid_s << " ZB:i:" << (it >> 32)
                     << " ZE:i:" << (it << 32 >> 32);
         }
 
-        fasta_s << std::endl
+        solid_s << std::endl
                 << src[sources[rank[i]]]->data
                 << std::endl;
 
@@ -370,31 +382,94 @@ void reconstruct(const std::vector<Annotation>& annotations,
 
             nodes[k].edges.emplace_back(rank[j]);
 
-            gfa_s << "L\t" << src[sources[rank[i]]]->name << "\t"
-                  << (overlaps[rank[i]].strand ? "+\t" : "-\t")
-                  << src[sources[rank[j]]]->name << "\t"
-                  << (overlaps[rank[j]].strand ? "+\t" : "-\t")
-                  << "*"
-                  << std::endl;
+            graph_s << "L\t" << src[sources[rank[i]]]->name << "\t"
+                    << (overlaps[rank[i]].strand ? "+\t" : "-\t")
+                    << src[sources[rank[j]]]->name << "\t"
+                    << (overlaps[rank[j]].strand ? "+\t" : "-\t")
+                    << "*"
+                    << std::endl;
         }
         rank_to_node[rank[i]] = k++;
     }
 
-    fasta_s.close();
-    gfa_s.close();
+    graph_s.close();
+    graph_s.close();
 
-    std::cerr << "[ratlesnake::reconstruct] longest genome reconstruction"
+    std::cerr << "[ratlesnake::] chromosome reconstruction ratios"
               << std::endl;
     for (std::uint32_t i = 0; i < nodes.size(); ++i) {
         std::uint32_t t_id = overlaps[nodes[i].id].t_id;
+        if (i == 0 || t_id != overlaps[nodes[i - 1].id].t_id) {
+            if (i != 0) {
+                std::cerr << std::endl;
+            }
+            std::cerr << "[ratlesnake::] " << dst[t_id - src.size()]->name
+                      << std::setprecision(3);
+        }
         std::uint32_t t_begin = overlaps[nodes[i].id].t_begin;
         while (!nodes[i].edges.empty()) {
             i = rank_to_node[nodes[i].edges.front()];
         }
         std::uint32_t t_end = overlaps[nodes[i].id].t_end;
-        std::cerr << "[ratlesnake::reconstruct] " << dst[t_id - src.size()]->name
-                  << " - " << std::setprecision(3)
-                  << static_cast<double>(t_end - t_begin) / dst[t_id - src.size()]->data.size()
-                  << std::endl;
+        std::cerr << " -> "
+                  << static_cast<double>(t_end - t_begin) / dst[t_id - src.size()]->data.size();
     }
+    std::cerr << std::endl;
+
+    std::ofstream contained_s("ratlesnake_contained.fasta");
+    std::ofstream chimeric_s("ratlesnake_chimeric.fasta");
+    std::ofstream repetitive_s("ratlesnake_repetitive.fasta");
+
+    std::uint32_t num_contained = 0, num_chimeric = 0, num_repetitive = 0;
+
+    for (const auto& it: src) {
+        if (!annotations[it->id].inclusion_intervals.empty()) {
+            ++num_contained;
+            const auto& intervals = annotations[it->id].inclusion_intervals;
+            contained_s << ">" << it->name
+                        << " LN:i:" << it->data.size()
+                        << " XB:i:" << (intervals.back() >> 32)
+                        << " XE:i:" << (intervals.back() << 32 >> 32);
+            for (std::uint32_t i = 0; i < intervals.size() - 1; ++i) {
+                contained_s << " XI:i:" << intervals[i];
+            }
+            contained_s << std::endl
+                        << it->data
+                        << std::endl;
+        }
+        if (!annotations[it->id].chimeric_regions.empty()) {
+            ++num_chimeric;
+            chimeric_s << ">" << it->name
+                       << " LN:i:" << it->data.size();
+            for (const auto& jt: annotations[it->id].chimeric_regions) {
+                chimeric_s << " YB:i:" << (jt >> 32)
+                           << " YB:i:" << (jt << 32 >> 32);
+            }
+            chimeric_s << std::endl
+                       << it->data
+                       << std::endl;
+        }
+        if (!annotations[it->id].repetitive_regions.empty()) {
+            ++num_repetitive;
+            repetitive_s << ">" << it->name
+                       << " LN:i:" << it->data.size();
+            for (const auto& jt: annotations[it->id].repetitive_regions) {
+                repetitive_s << " ZB:i:" << (jt >> 32)
+                           << " ZB:i:" << (jt << 32 >> 32);
+            }
+            repetitive_s << std::endl
+                       << it->data
+                       << std::endl;
+        }
+    }
+
+    repetitive_s.close();
+    chimeric_s.close();
+    contained_s.close();
+
+    std::cerr << "[ratlesnake::] sequence information" << std::endl
+              << "[ratlesnake::] # -> " << src.size() << std::endl
+              << "[ratlesnake::] # contained -> " << num_contained << std::endl
+              << "[ratlesnake::] # chimeric -> " << num_chimeric << std::endl
+              << "[ratlesnake::] # repetitive -> " << num_repetitive << std::endl;
 }
