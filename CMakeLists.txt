@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.2)
-project(rattlesnake LANGUAGES CXX)
+project(ratlesnake LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -16,9 +16,9 @@ if (NOT TARGET bioparser)
     add_subdirectory(vendor/bioparser EXCLUDE_FROM_ALL)
 endif()
 
-add_executable(rattlesnake
+add_executable(ratlesnake
     src/main.cpp)
 
-target_link_libraries(rattlesnake bioparser)
+target_link_libraries(ratlesnake bioparser)
 
-install(TARGETS rattlesnake DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(TARGETS ratlesnake DESTINATION ${CMAKE_INSTALL_LIBDIR})
