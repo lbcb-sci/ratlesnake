@@ -10,9 +10,9 @@ Ratlesnake was designed to aid development of new assembly algorithms. Given a r
 
 Ratlesnake takes as input two files: third generation sequencing data in FASTA/FASTQ format and the corresponding reference genome, as well in FASTA/FASTQ format. All input files **can be compressed with gzip** (which will have impact on parsing time). Output is a set of files which are described bellow:
 
-* ratlesnake.gfa
+* `ratlesnake.gfa`
     * contains the assembly graph of each chromosome (multiple parts per chromosome possible)
-* ratlesnake_solid.fasta
+* `ratlesnake_solid.fasta`
     * contains uncontained and non-chimeric sequences used for building the assembly graph
     * headers have the following custom tags:
         * XB:i:\<int\> - valid region begin
@@ -21,16 +21,16 @@ Ratlesnake takes as input two files: third generation sequencing data in FASTA/F
         * YE:i:\<int\> - chimeric region end
         * ZB:i:\<int\> - repetitive region begin
         * ZE:i:\<int\> - repetitive region end
-* ratlesnake_contained.fasta
+* `ratlesnake_contained.fasta`
     * contains sequences that are contained in others
     * headers have the following custom tags:
         * XB/XE - as above
         * XI:i:\<int\> - zero-based index of sequence in which it is contained
-* ratlesnake_chimeric.fasta
+* `ratlesnake_chimeric.fasta`
     * contains sequences that are chimeric
     * headers have the following custom tags:
         * YB/YE - as above
-* ratlesnake_repeats.fasta
+* `ratlesnake_repeats.fasta`
     * contains sequences that are overlapping repetitive genomic regions
         * ZB/ZE - as above
 
