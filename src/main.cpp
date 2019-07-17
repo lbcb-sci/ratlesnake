@@ -2,13 +2,12 @@
 
 #include <cstdint>
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <memory>
-#include <unordered_map>
-#include <unordered_set>
+#include <numeric>
+#include <iomanip>
 #include <algorithm>
-#include <math.h>
-#include <set>
 
 #include "bioparser/bioparser.hpp"
 #include "thread_pool/thread_pool.hpp"
@@ -174,8 +173,8 @@ std::vector<Annotation> annotate(
                     if (overlaps[k].q_end < overlaps[j].q_end) {
                         bool is_chimeric = true;
                         if (overlaps[k].t_id == overlaps[j].t_id) {
-                            std::uint32_t q_gap = abs(overlaps[j].q_begin - overlaps[k].q_end);
-                            std::uint32_t t_gap = abs(overlaps[j].t_begin - overlaps[k].t_end);
+                            std::uint32_t q_gap = abs(static_cast<int32_t>(overlaps[j].q_begin - overlaps[k].q_end));
+                            std::uint32_t t_gap = abs(static_cast<int32_t>(overlaps[j].t_begin - overlaps[k].t_end));
                             is_chimeric &= std::min(q_gap, t_gap) <
                                 0.88 * std::max(q_gap, t_gap);
                         }
@@ -294,9 +293,12 @@ void reconstruct(const std::vector<Annotation>& annotations,
     }
 
     // remove contained reads
-    // TODO: sort sources!
-    std::sort(overlaps.begin(), overlaps.end(),
-        [] (const ram::Overlap& lhs, const ram::Overlap& rhs) -> bool {
+    std::vector<uint32_t> rank(overlaps.size());
+    std::iota(rank.begin(), rank.end(), 0);
+    std::sort(rank.begin(), rank.end(),
+        [&overlaps] (std::uint32_t lhsr, std::uint32_t rhsr) -> bool {
+            const auto& lhs = overlaps[lhsr];
+            const auto& rhs = overlaps[rhsr];
             return lhs.t_id < rhs.t_id ||
                 (lhs.t_id == rhs.t_id && lhs.t_begin < rhs.t_begin) ||
                 (lhs.t_id == rhs.t_id && lhs.t_begin == rhs.t_begin && lhs.t_end > rhs.t_end);
@@ -304,51 +306,95 @@ void reconstruct(const std::vector<Annotation>& annotations,
 
     for (std::uint32_t i = 0; i < overlaps.size(); ++i) {
         for (std::uint32_t j = i + 1; j < overlaps.size(); ++j) {
-            if (overlaps[i].t_id != overlaps[j].t_id ||
-                overlaps[i].t_end < overlaps[j].t_end) {
+            if (overlaps[rank[i]].t_id != overlaps[rank[j]].t_id ||
+                overlaps[rank[i]].t_end < overlaps[rank[j]].t_end) {
                 i = j - 1;
                 break;
             }
-            sources[j] = -1;
+            sources[rank[j]] = -1;
         }
-    }
-
-    {
-        std::vector<uint64_t> s;
-        std::vector<ram::Overlap> o;
-        for (std::uint32_t i = 0; i < overlaps.size(); ++i) {
-            if (sources[i] != -1ULL) {
-                s.emplace_back(sources[i]);
-                o.emplace_back(overlaps[i]);
-            }
-        }
-        s.swap(sources);
-        o.swap(overlaps);
     }
 
     // create assembly graph
-    using Node = std::vector<std::pair<std::uint64_t, std::uint32_t>>;
-    std::vector<Node> nodes(src.size());
+    struct Node {
+        std::uint64_t id;
+        std::vector<std::uint64_t> edges;
+    };
 
-    for (std::uint32_t i = 0; i < overlaps.size(); ++i) {
-        std::cout << "S\t" << src[sources[i]]->name << "\t"
-                  << src[sources[i]]->data << "\tLN:i:"
-                  << src[sources[i]]->data.size() << "\tRC:i:1" << std::endl;
-        for (std::uint32_t j = i + 1; j < overlaps.size(); ++j) {
-            if (overlaps[i].t_id != overlaps[j].t_id ||
-                overlaps[i].t_end < overlaps[j].t_begin) {
-                break;
-            }
-            nodes[i].emplace_back(sources[j], overlaps[i].t_end - overlaps[j].t_begin);
-            std::cout << "L\t" << src[sources[i]]->name << "\t"
-                      << (overlaps[i].strand ? "+\t" : "-\t")
-                      << src[sources[j]]->name << "\t"
-                      << (overlaps[j].strand ? "+\t" : "-\t")
-                      << overlaps[i].t_end - overlaps[j].t_begin << "M" << std::endl;
+    std::uint32_t num_nodes = 0;
+    for (const auto& it: sources) {
+        if (it != -1ULL) {
+            ++num_nodes;
         }
     }
+    std::vector<Node> nodes(num_nodes);
+    std::vector<std::uint64_t> rank_to_node(src.size());
 
-    for (const auto& it: nodes) {
+    std::ofstream gfa_s("ratlesnake.gfa");
+    std::ofstream fasta_s("ratlesnake_solid.fasta");
 
+    for (std::uint32_t i = 0, k = 0; i < overlaps.size(); ++i) {
+        if (sources[rank[i]] == -1ULL) {
+            continue;
+        }
+
+        gfa_s << "S\t" << src[sources[rank[i]]]->name << "\t"
+              << "*" << "\t"
+              << "LN:i:" << src[sources[rank[i]]]->data.size() << "\t"
+              << "UR:Z:ratlesnake_solid.fasta"
+              << std::endl;
+
+        fasta_s << ">" << src[sources[rank[i]]]->name
+                << " LN:i:" << src[sources[rank[i]]]->data.size()
+                << " XB:i:" << overlaps[rank[i]].q_begin
+                << " XE:i:" << overlaps[rank[i]].q_end;
+        for (const auto& it: annotations[sources[rank[i]]].repetitive_regions) {
+            fasta_s << " ZB:i:" << (it >> 32)
+                    << " ZE:i:" << (it << 32 >> 32);
+        }
+
+        fasta_s << std::endl
+                << src[sources[rank[i]]]->data
+                << std::endl;
+
+        nodes[k].id = rank[i];
+
+        for (std::uint32_t j = i + 1; j < overlaps.size(); ++j) {
+            if (sources[rank[j]] == -1ULL) {
+                continue;
+            }
+            if (overlaps[rank[i]].t_id != overlaps[rank[j]].t_id ||
+                overlaps[rank[i]].t_end < overlaps[rank[j]].t_begin) {
+                break;
+            }
+
+            nodes[k].edges.emplace_back(rank[j]);
+
+            gfa_s << "L\t" << src[sources[rank[i]]]->name << "\t"
+                  << (overlaps[rank[i]].strand ? "+\t" : "-\t")
+                  << src[sources[rank[j]]]->name << "\t"
+                  << (overlaps[rank[j]].strand ? "+\t" : "-\t")
+                  << "*"
+                  << std::endl;
+        }
+        rank_to_node[rank[i]] = k++;
+    }
+
+    fasta_s.close();
+    gfa_s.close();
+
+    std::cerr << "[ratlesnake::reconstruct] longest genome reconstruction"
+              << std::endl;
+    for (std::uint32_t i = 0; i < nodes.size(); ++i) {
+        std::uint32_t t_id = overlaps[nodes[i].id].t_id;
+        std::uint32_t t_begin = overlaps[nodes[i].id].t_begin;
+        while (!nodes[i].edges.empty()) {
+            i = rank_to_node[nodes[i].edges.front()];
+        }
+        std::uint32_t t_end = overlaps[nodes[i].id].t_end;
+        std::cerr << "[ratlesnake::reconstruct] " << dst[t_id - src.size()]->name
+                  << " - " << std::setprecision(3)
+                  << static_cast<double>(t_end - t_begin) / dst[t_id - src.size()]->data.size()
+                  << std::endl;
     }
 }
