@@ -443,7 +443,7 @@ void reconstruct(std::vector<Annotation>& annotations,
                        << " LN:i:" << it->data.size();
             for (const auto& jt: annotations[it->id].chimeric_regions) {
                 chimeric_s << " YB:i:" << (jt >> 32)
-                           << " YB:i:" << (jt << 32 >> 32);
+                           << " YE:i:" << (jt << 32 >> 32);
             }
             chimeric_s << std::endl
                        << it->data
@@ -455,7 +455,7 @@ void reconstruct(std::vector<Annotation>& annotations,
                        << " LN:i:" << it->data.size();
             for (const auto& jt: annotations[it->id].repetitive_regions) {
                 repetitive_s << " ZB:i:" << (jt >> 32)
-                           << " ZB:i:" << (jt << 32 >> 32);
+                           << " ZE:i:" << (jt << 32 >> 32);
             }
             repetitive_s << std::endl
                        << it->data
