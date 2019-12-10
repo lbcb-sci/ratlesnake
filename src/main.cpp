@@ -13,7 +13,7 @@
 #include "thread_pool/thread_pool.hpp"
 #include "ram/ram.hpp"
 
-static const std::string version = "v0.0.2";
+static const std::string version = "v0.0.3";
 
 static struct option options[] = {
     {"threads", required_argument, nullptr, 't'},
@@ -195,18 +195,30 @@ std::vector<Annotation> annotate(
                 }
 
                 // annotate repetitive regions
+                auto is_valid_repeat = [] (std::uint32_t q_begin, std::uint32_t q_end, std::uint32_t q_length) -> bool {
+                    return q_end - q_begin > 500 &&
+                        (q_begin < 0.05 * q_length || q_end > 0.95 * q_length || q_end - q_begin > 2000);
+                };
                 k = 0;
+                std::uint32_t q_length = src[i]->data.size();
+                std::uint32_t q_begin;
                 std::uint32_t q_end = repetitive_overlaps[k].q_end;
                 for (std::uint32_t j = 1; j < repetitive_overlaps.size(); ++j) {
                     if (q_end < repetitive_overlaps[j].q_begin) {
-                        annotations[src[i]->id].repetitive_regions.emplace_back(
-                            static_cast<uint64_t>(repetitive_overlaps[k].q_begin) << 32 | q_end);
+                        q_begin = repetitive_overlaps[k].q_begin;
+                        if (is_valid_repeat(q_begin, q_end, q_length)) {
+                            annotations[src[i]->id].repetitive_regions.emplace_back(
+                                static_cast<uint64_t>(q_begin) << 32 | q_end);
+                        }
                         k = j;
                     }
                     q_end = std::max(q_end, repetitive_overlaps[j].q_end);
                 }
-                annotations[src[i]->id].repetitive_regions.emplace_back(
-                    static_cast<uint64_t>(repetitive_overlaps[k].q_begin) << 32 | q_end);
+                q_begin = repetitive_overlaps[k].q_begin;
+                if (is_valid_repeat(q_begin, q_end, q_length)) {
+                    annotations[src[i]->id].repetitive_regions.emplace_back(
+                        static_cast<uint64_t>(q_begin) << 32 | q_end);
+                }
 
                 return repetitive_overlaps;
             }
