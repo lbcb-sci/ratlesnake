@@ -56,6 +56,7 @@ struct Annotation {
     std::vector<std::uint64_t> inclusion_intervals;
     std::vector<std::uint64_t> chimeric_regions;
     std::vector<std::uint64_t> repetitive_regions;
+    bool is_junk = false;
 };
 
 std::vector<Annotation> annotate(
@@ -143,21 +144,27 @@ std::vector<Annotation> annotate(
     const std::vector<std::unique_ptr<ram::Sequence>>& dst,
     std::uint32_t num_threads) {
 
-    auto thread_pool = thread_pool::createThreadPool(num_threads);
+    std::shared_ptr<thread_pool::ThreadPool> thread_pool = thread_pool::createThreadPool(num_threads);
 
     std::vector<Annotation> annotations(src.size() + dst.size());
 
-    ram::MinimizerEngine minimizer_engine(15, 5, num_threads);
-    minimizer_engine.minimize(dst.begin(), dst.end());
-    minimizer_engine.filter(0.001);
+    auto minimizer_engine = ram::createMinimizerEngine(15, 5, thread_pool);
+    minimizer_engine->minimize(dst.begin(), dst.end());
+    minimizer_engine->filter(0.001);
 
     std::vector<std::future<std::vector<ram::Overlap>>> thread_futures;
     for (std::uint32_t i = 0; i < src.size(); ++i) {
         thread_futures.emplace_back(thread_pool->submit(
             [&] (std::uint32_t i) -> std::vector<ram::Overlap> {
-                auto overlaps = minimizer_engine.map(src[i], false, false);
+                auto overlaps = minimizer_engine->map(src[i], false, false);
                 std::vector<ram::Overlap> repetitive_overlaps;
                 if (overlaps.size() < 2) {
+                    if (overlaps.size() == 1) {
+                        if ((overlaps[0].q_end - overlaps[0].q_begin) < 0.4 * src[i]->data.size() ||
+                            static_cast<double>(overlaps[0].matches) / (overlaps[0].q_end - overlaps[0].q_begin) < 0.1) {
+                                annotations[src[i]->id].is_junk = true;
+                            }
+                    }
                     return repetitive_overlaps;
                 }
 
@@ -190,7 +197,7 @@ std::vector<Annotation> annotate(
                     }
                 }
 
-                if (repetitive_overlaps.empty()) {
+                if (repetitive_overlaps.empty() || !annotations[src[i]->id].chimeric_regions.empty()) {
                     return repetitive_overlaps;
                 }
 
@@ -246,7 +253,7 @@ std::vector<Annotation> annotate(
         });
 
     std::uint32_t j = 0;
-    std::uint32_t t_end = repetitive_overlaps[j].q_end;
+    std::uint32_t t_end = repetitive_overlaps[j].t_end;
     for (std::uint32_t i = 1; i < repetitive_overlaps.size(); ++i) {
         if (repetitive_overlaps[i - 1].t_id != repetitive_overlaps[i].t_id ||
             t_end < repetitive_overlaps[i].t_begin) {
@@ -270,19 +277,19 @@ void reconstruct(std::vector<Annotation>& annotations,
     const std::vector<std::unique_ptr<ram::Sequence>>& dst,
     std::uint32_t num_threads) {
 
-    auto thread_pool = thread_pool::createThreadPool(num_threads);
+    std::shared_ptr<thread_pool::ThreadPool> thread_pool = thread_pool::createThreadPool(num_threads);
 
-    ram::MinimizerEngine minimizer_engine(15, 5, num_threads);
-    minimizer_engine.minimize(dst.begin(), dst.end());
-    minimizer_engine.filter(0.001);
+    auto minimizer_engine = ram::createMinimizerEngine(15, 5, thread_pool);
+    minimizer_engine->minimize(dst.begin(), dst.end());
+    minimizer_engine->filter(0.001);
 
     std::vector<std::future<ram::Overlap>> thread_futures;
     for (std::uint32_t i = 0; i < src.size(); ++i) {
         thread_futures.emplace_back(thread_pool->submit(
             [&] (std::uint32_t i) -> ram::Overlap {
-                auto overlaps = minimizer_engine.map(src[i], false, false);
+                auto overlaps = minimizer_engine->map(src[i], false, false);
                 if (overlaps.empty()) {
-                    return ram::Overlap(-1, -1, -1, -1, -1, -1);
+                    return ram::Overlap(-1, -1, -1, -1, -1, -1, -1, -1);
                 }
                 std::sort(overlaps.begin(), overlaps.end(),
                     [] (const ram::Overlap& lhs, const ram::Overlap& rhs) -> bool {
@@ -298,7 +305,7 @@ void reconstruct(std::vector<Annotation>& annotations,
     for (std::uint32_t i = 0; i < thread_futures.size(); ++i) {
         thread_futures[i].wait();
         auto overlap = thread_futures[i].get();
-        if (overlap.t_id != -1ULL) {
+        if (overlap.t_id != -1U) {
             sources.emplace_back(src[i]->id);
             overlaps.emplace_back(overlap);
         }
@@ -431,10 +438,21 @@ void reconstruct(std::vector<Annotation>& annotations,
     std::ofstream contained_s("ratlesnake_contained.fasta");
     std::ofstream chimeric_s("ratlesnake_chimeric.fasta");
     std::ofstream repetitive_s("ratlesnake_repetitive.fasta");
+    std::ofstream junk_s("ratlesnake_junk.fasta");
 
-    std::uint32_t num_contained = 0, num_chimeric = 0, num_repetitive = 0;
+    std::uint32_t num_contained = 0, num_chimeric = 0, num_repetitive = 0, num_junk = 0;
 
     for (const auto& it: src) {
+        if (annotations[it->id].is_junk) {
+            num_junk++;
+            junk_s << ">" << it->name
+                   << " LN:i:" << it->data.size()
+                   << " " << it->id;
+            junk_s << std::endl
+                   << it->data
+                   << std::endl;
+            continue;
+        }
         if (!annotations[it->id].inclusion_intervals.empty()) {
             ++num_contained;
             const auto& intervals = annotations[it->id].inclusion_intervals;
@@ -445,6 +463,7 @@ void reconstruct(std::vector<Annotation>& annotations,
             for (std::uint32_t i = 0; i < intervals.size() - 1; ++i) {
                 contained_s << " XI:i:" << intervals[i];
             }
+            contained_s << " " << it->id;
             contained_s << std::endl
                         << it->data
                         << std::endl;
@@ -457,6 +476,7 @@ void reconstruct(std::vector<Annotation>& annotations,
                 chimeric_s << " YB:i:" << (jt >> 32)
                            << " YE:i:" << (jt << 32 >> 32);
             }
+            chimeric_s << " " << it->id;
             chimeric_s << std::endl
                        << it->data
                        << std::endl;
@@ -469,6 +489,7 @@ void reconstruct(std::vector<Annotation>& annotations,
                 repetitive_s << " ZB:i:" << (jt >> 32)
                            << " ZE:i:" << (jt << 32 >> 32);
             }
+            repetitive_s << " " << it->id;
             repetitive_s << std::endl
                        << it->data
                        << std::endl;
@@ -478,10 +499,12 @@ void reconstruct(std::vector<Annotation>& annotations,
     repetitive_s.close();
     chimeric_s.close();
     contained_s.close();
+    junk_s.close();
 
     std::cerr << "[ratlesnake::] sequence information" << std::endl
               << "[ratlesnake::] # -> " << src.size() << std::endl
               << "[ratlesnake::] # contained -> " << num_contained << std::endl
               << "[ratlesnake::] # chimeric -> " << num_chimeric << std::endl
-              << "[ratlesnake::] # repetitive -> " << num_repetitive << std::endl;
+              << "[ratlesnake::] # repetitive -> " << num_repetitive << std::endl
+              << "[ratlesnake::] # junk -> " << num_junk << std::endl;
 }
