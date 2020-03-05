@@ -198,7 +198,7 @@ std::vector<Annotation> annotate(
                 }
 
                 if (repetitive_overlaps.empty() || !annotations[src[i]->id].chimeric_regions.empty()) {
-                    return repetitive_overlaps;
+                    return std::vector<ram::Overlap>();
                 }
 
                 // annotate repetitive regions
