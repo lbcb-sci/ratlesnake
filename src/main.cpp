@@ -384,6 +384,7 @@ void reconstruct(std::vector<Annotation>& annotations,
                     << " ZE:i:" << (it << 32 >> 32);
         }
 
+        solid_s << " " << sources[rank[i]];
         solid_s << std::endl
                 << src[sources[rank[i]]]->data
                 << std::endl;
