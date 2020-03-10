@@ -53,7 +53,6 @@ std::unique_ptr<bioparser::Parser<ram::Sequence>> createSequenceParser(
 // void transform(std::vector<std::unique_ptr<ram::Sequence>>& src);
 
 struct Annotation {
-    std::vector<std::uint64_t> inclusion_intervals;
     std::vector<std::uint64_t> chimeric_regions;
     std::vector<std::uint64_t> repetitive_regions;
     bool is_junk = false;
@@ -330,15 +329,7 @@ void reconstruct(std::vector<Annotation>& annotations,
                 i = j - 1;
                 break;
             }
-            annotations[sources[rank[j]]].inclusion_intervals.emplace_back(sources[rank[i]]);
-        }
-    }
-
-    for (std::uint32_t i = 0; i < overlaps.size(); ++i) {
-        if (annotations[sources[rank[i]]].inclusion_intervals.empty() == false) {
-            annotations[sources[rank[i]]].inclusion_intervals.emplace_back(
-                static_cast<std::uint64_t>(overlaps[rank[i]].q_begin) << 32 | overlaps[rank[i]].q_end);
-            sources[rank[i]] = -1;
+            sources[rank[j]] = -1;
         }
     }
 
@@ -358,7 +349,6 @@ void reconstruct(std::vector<Annotation>& annotations,
     std::vector<std::uint64_t> rank_to_node(src.size());
 
     std::ofstream graph_s("ratlesnake.gfa");
-    std::ofstream solid_s("ratlesnake_solid.fasta");
 
     for (std::uint32_t i = 0, k = 0; i < overlaps.size(); ++i) {
         if (sources[rank[i]] == -1ULL) {
@@ -368,25 +358,6 @@ void reconstruct(std::vector<Annotation>& annotations,
         graph_s << "S\t" << src[sources[rank[i]]]->name << "\t"
                 << "*" << "\t"
                 << "LN:i:" << src[sources[rank[i]]]->data.size() << "\t"
-                << "UR:Z:ratlesnake_solid.fasta"
-                << std::endl;
-
-        solid_s << ">" << src[sources[rank[i]]]->name
-                << " LN:i:" << src[sources[rank[i]]]->data.size()
-                << " XB:i:" << overlaps[rank[i]].q_begin
-                << " XE:i:" << overlaps[rank[i]].q_end;
-        for (const auto& it: annotations[sources[rank[i]]].chimeric_regions) {
-            solid_s << " YB:i:" << (it >> 32)
-                    << " YE:i:" << (it << 32 >> 32);
-        }
-        for (const auto& it: annotations[sources[rank[i]]].repetitive_regions) {
-            solid_s << " ZB:i:" << (it >> 32)
-                    << " ZE:i:" << (it << 32 >> 32);
-        }
-
-        solid_s << " " << sources[rank[i]];
-        solid_s << std::endl
-                << src[sources[rank[i]]]->data
                 << std::endl;
 
         nodes[k].id = rank[i];
@@ -413,7 +384,6 @@ void reconstruct(std::vector<Annotation>& annotations,
     }
 
     graph_s.close();
-    graph_s.close();
 
     std::cerr << "[ratlesnake::] chromosome reconstruction ratios"
               << std::endl;
@@ -436,12 +406,12 @@ void reconstruct(std::vector<Annotation>& annotations,
     }
     std::cerr << std::endl;
 
-    std::ofstream contained_s("ratlesnake_contained.fasta");
+    std::ofstream regular_s("ratlesnake_regular.fasta");
     std::ofstream chimeric_s("ratlesnake_chimeric.fasta");
     std::ofstream repetitive_s("ratlesnake_repetitive.fasta");
     std::ofstream junk_s("ratlesnake_junk.fasta");
 
-    std::uint32_t num_contained = 0, num_chimeric = 0, num_repetitive = 0, num_junk = 0;
+    std::uint32_t num_regular = 0, num_chimeric = 0, num_repetitive = 0, num_junk = 0;
 
     for (const auto& it: src) {
         if (annotations[it->id].is_junk) {
@@ -453,21 +423,6 @@ void reconstruct(std::vector<Annotation>& annotations,
                    << it->data
                    << std::endl;
             continue;
-        }
-        if (!annotations[it->id].inclusion_intervals.empty()) {
-            ++num_contained;
-            const auto& intervals = annotations[it->id].inclusion_intervals;
-            contained_s << ">" << it->name
-                        << " LN:i:" << it->data.size()
-                        << " XB:i:" << (intervals.back() >> 32)
-                        << " XE:i:" << (intervals.back() << 32 >> 32);
-            for (std::uint32_t i = 0; i < intervals.size() - 1; ++i) {
-                contained_s << " XI:i:" << intervals[i];
-            }
-            contained_s << " " << it->id;
-            contained_s << std::endl
-                        << it->data
-                        << std::endl;
         }
         if (!annotations[it->id].chimeric_regions.empty()) {
             ++num_chimeric;
@@ -481,6 +436,7 @@ void reconstruct(std::vector<Annotation>& annotations,
             chimeric_s << std::endl
                        << it->data
                        << std::endl;
+            continue;
         }
         if (!annotations[it->id].repetitive_regions.empty()) {
             ++num_repetitive;
@@ -494,17 +450,25 @@ void reconstruct(std::vector<Annotation>& annotations,
             repetitive_s << std::endl
                        << it->data
                        << std::endl;
+            continue;
         }
+        ++num_regular;
+        regular_s << ">" << it->name
+                  << " LN:i:" << it->data.size()
+                  << " " << it->id;
+        regular_s << std::endl
+                  << it->data
+                  << std::endl;
     }
 
     repetitive_s.close();
     chimeric_s.close();
-    contained_s.close();
+    regular_s.close();
     junk_s.close();
 
     std::cerr << "[ratlesnake::] sequence information" << std::endl
               << "[ratlesnake::] # -> " << src.size() << std::endl
-              << "[ratlesnake::] # contained -> " << num_contained << std::endl
+              << "[ratlesnake::] # regular -> " << num_regular << std::endl
               << "[ratlesnake::] # chimeric -> " << num_chimeric << std::endl
               << "[ratlesnake::] # repetitive -> " << num_repetitive << std::endl
               << "[ratlesnake::] # junk -> " << num_junk << std::endl;
