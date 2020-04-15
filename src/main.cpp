@@ -159,8 +159,8 @@ std::vector<Annotation> annotate(
                 std::vector<ram::Overlap> repetitive_overlaps;
                 if (overlaps.size() < 2) {
                     if (overlaps.size() == 1) {
-                        if ((overlaps[0].q_end - overlaps[0].q_begin) < 0.4 * src[i]->data.size() ||
-                            static_cast<double>(overlaps[0].matches) / (overlaps[0].q_end - overlaps[0].q_begin) < 0.1) {
+                        if ((overlaps[0].q_end - overlaps[0].q_begin) < 0.5 * src[i]->data.size() ||
+                            static_cast<double>(overlaps[0].matches) / (overlaps[0].q_end - overlaps[0].q_begin) < 0.27) {
                                 annotations[src[i]->id].is_junk = true;
                             }
                     }
@@ -203,7 +203,7 @@ std::vector<Annotation> annotate(
                 // annotate repetitive regions
                 auto is_valid_repeat = [] (std::uint32_t q_begin, std::uint32_t q_end, std::uint32_t q_length) -> bool {
                     return q_end - q_begin > 500 &&
-                        (q_begin < 0.05 * q_length || q_end > 0.95 * q_length || q_end - q_begin > 2000);
+                        (q_begin < 0.05 * q_length || q_end > 0.95 * q_length || q_end - q_begin > 1500);
                 };
                 k = 0;
                 std::uint32_t q_length = src[i]->data.size();
