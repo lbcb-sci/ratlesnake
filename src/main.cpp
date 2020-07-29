@@ -408,7 +408,7 @@ void reconstruct(std::vector<Annotation>& annotations,
 
     std::ofstream regular_s("ratlesnake_regular.fasta");
     std::ofstream chimeric_s("ratlesnake_chimeric.fasta");
-    std::ofstream repetitive_s("ratlesnake_repetitive.fasta");
+    std::ofstream repetitive_s("ratlesnake_repeats.fasta");
     std::ofstream junk_s("ratlesnake_junk.fasta");
 
     std::uint32_t num_regular = 0, num_chimeric = 0, num_repetitive = 0, num_junk = 0;
