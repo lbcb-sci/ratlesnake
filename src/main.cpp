@@ -37,8 +37,8 @@ std::unique_ptr<bioparser::Parser<biosoup::Sequence>> CreateParser(
         s.compare(s.size() - suff.size(), suff.size(), suff) == 0;
   };
 
-  if (is_suffix(path, ".fasta")    || is_suffix(path, ".fa") ||
-      is_suffix(path, ".fasta.gz") || is_suffix(path, ".fa.gz")) {
+  if (is_suffix(path, ".fasta")    || is_suffix(path, ".fa")    || is_suffix(path, ".fna") ||
+      is_suffix(path, ".fasta.gz") || is_suffix(path, ".fa.gz") || is_suffix(path, ".fna.gz")) {
     try {
       return bioparser::Parser<biosoup::Sequence>::Create<bioparser::FastaParser>(path);  // NOLINT
     } catch (const std::invalid_argument& exception) {
@@ -58,7 +58,8 @@ std::unique_ptr<bioparser::Parser<biosoup::Sequence>> CreateParser(
 
   std::cerr << "[ratlesnake::CreateParser] error: file " << path
             << " has unsupported format extension (valid extensions: .fasta, "
-            << ".fasta.gz, .fa, .fa.gz, .fastq, .fastq.gz, .fq, .fq.gz)!"
+            << ".fasta.gz, .fa, .fa.gz, .fna, .fna.gz, .fastq, .fastq.gz, "
+            << ".fq, .fq.gz)!"
             << std::endl;
   return nullptr;
 }
@@ -137,8 +138,8 @@ std::vector<Annotation> Annotate(
             if (overlaps[k].lhs_end < overlaps[j].lhs_end) {
               bool is_chimeric = true;
               if (overlaps[k].rhs_id == overlaps[j].rhs_id) {
-                std::uint32_t lhs_gap = abs(static_cast<std::int32_t>(overlaps[j].lhs_begin) - overlaps[k].lhs_end);  // NOLINT
-                std::uint32_t rhs_gap = abs(static_cast<std::int32_t>(overlaps[j].rhs_begin) - overlaps[k].rhs_end);  // NOLINT
+                std::uint32_t lhs_gap = std::abs(static_cast<std::int32_t>(overlaps[j].lhs_begin - overlaps[k].lhs_end));  // NOLINT
+                std::uint32_t rhs_gap = std::abs(static_cast<std::int32_t>(overlaps[j].rhs_begin - overlaps[k].rhs_end));  // NOLINT
                 is_chimeric &= std::min(lhs_gap, rhs_gap) < 0.88 * std::max(lhs_gap, rhs_gap);  // NOLINT
               }
               if (is_chimeric) {
