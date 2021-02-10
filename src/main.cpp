@@ -17,11 +17,9 @@
 #include "bioparser/fastq_parser.hpp"
 #include "ram/minimizer_engine.hpp"
 
-std::atomic<std::uint32_t> biosoup::Sequence::num_objects{0};
+std::atomic<std::uint32_t> biosoup::NucleicAcid::num_objects{0};
 
 namespace {
-
-const char* ratlesnake_version = RATLESNAKE_VERSION;
 
 static struct option options[] = {
   {"threads", required_argument, nullptr, 't'},
@@ -30,26 +28,27 @@ static struct option options[] = {
   {nullptr, 0, nullptr, 0}
 };
 
-std::unique_ptr<bioparser::Parser<biosoup::Sequence>> CreateParser(
+std::unique_ptr<bioparser::Parser<biosoup::NucleicAcid>> CreateParser(
     const std::string& path) {
   auto is_suffix = [] (const std::string& s, const std::string& suff) {
     return s.size() < suff.size() ? false :
         s.compare(s.size() - suff.size(), suff.size(), suff) == 0;
   };
 
-  if (is_suffix(path, ".fasta")    || is_suffix(path, ".fa")    || is_suffix(path, ".fna") ||
-      is_suffix(path, ".fasta.gz") || is_suffix(path, ".fa.gz") || is_suffix(path, ".fna.gz")) {
+  if (is_suffix(path, ".fasta") || is_suffix(path, ".fasta.gz") ||
+      is_suffix(path, ".fna")   || is_suffix(path, ".fna.gz") ||
+      is_suffix(path, ".fa")    || is_suffix(path, ".fa.gz")) {
     try {
-      return bioparser::Parser<biosoup::Sequence>::Create<bioparser::FastaParser>(path);  // NOLINT
+      return bioparser::Parser<biosoup::NucleicAcid>::Create<bioparser::FastaParser>(path);  // NOLINT
     } catch (const std::invalid_argument& exception) {
       std::cerr << exception.what() << std::endl;
       return nullptr;
     }
   }
-  if (is_suffix(path, ".fastq")    || is_suffix(path, ".fq") ||
-      is_suffix(path, ".fastq.gz") || is_suffix(path, ".fq.gz")) {
+  if (is_suffix(path, ".fastq") || is_suffix(path, ".fastq.gz") ||
+      is_suffix(path, ".fq")    || is_suffix(path, ".fq.gz")) {
     try {
-      return bioparser::Parser<biosoup::Sequence>::Create<bioparser::FastqParser>(path);  // NOLINT
+      return bioparser::Parser<biosoup::NucleicAcid>::Create<bioparser::FastqParser>(path);  // NOLINT
     } catch (const std::invalid_argument& exception) {
       std::cerr << exception.what() << std::endl;
       return nullptr;
@@ -58,7 +57,7 @@ std::unique_ptr<bioparser::Parser<biosoup::Sequence>> CreateParser(
 
   std::cerr << "[ratlesnake::CreateParser] error: file " << path
             << " has unsupported format extension (valid extensions: .fasta, "
-            << ".fasta.gz, .fa, .fa.gz, .fna, .fna.gz, .fastq, .fastq.gz, "
+            << ".fasta.gz, .fna, .fna.gz, .fa, .fa.gz, .fastq, .fastq.gz, "
             << ".fq, .fq.gz)!"
             << std::endl;
   return nullptr;
@@ -68,9 +67,7 @@ void Help() {
   std::cout <<
       "usage: ratlesnake [options ...] <sequences> <reference>\n"
       "\n"
-      "  <sequences>\n"
-      "    input file in FASTA/FASTQ format (can be compressed with gzip)\n"
-      "  <reference>\n"
+      "  <sequences>/<reference>\n"
       "    input file in FASTA/FASTQ format (can be compressed with gzip)\n"
       "\n"
       "  options:\n"
@@ -95,12 +92,12 @@ struct Annotation {
 };
 
 std::vector<Annotation> Annotate(
-    const std::vector<std::unique_ptr<biosoup::Sequence>>& src,
-    const std::vector<std::unique_ptr<biosoup::Sequence>>& dst,
+    const std::vector<std::unique_ptr<biosoup::NucleicAcid>>& src,
+    const std::vector<std::unique_ptr<biosoup::NucleicAcid>>& dst,
     std::shared_ptr<thread_pool::ThreadPool> thread_pool) {
   std::vector<Annotation> annotations(src.size() + dst.size());
 
-  ram::MinimizerEngine minimizer_engine{15, 5, 500, 4, 100, 10000, thread_pool};
+  ram::MinimizerEngine minimizer_engine{thread_pool};
   minimizer_engine.Minimize(dst.begin(), dst.end());
   minimizer_engine.Filter(0.001);
 
@@ -116,7 +113,7 @@ std::vector<Annotation> Annotate(
                   overlaps.front().lhs_end - overlaps.front().lhs_begin;
               double overlap_score =
                 overlaps.front().score / static_cast<double>(overlap_len);
-              if (overlap_len < 0.4 * src[i]->data.size() ||
+              if (overlap_len < 0.4 * src[i]->inflated_len ||
                   overlap_score < 0.1) {
                 annotations[src[i]->id].is_junk = true;
               }
@@ -171,7 +168,7 @@ std::vector<Annotation> Annotate(
                 (lhs_begin < 0.05 * lhs_length || lhs_end > 0.95 * lhs_length || lhs_end - lhs_begin > 2000);  // NOLINT
           };
 
-          std::uint32_t lhs_length = src[i]->data.size();
+          std::uint32_t lhs_length = src[i]->inflated_len;
           std::uint32_t lhs_begin;
           std::uint32_t lhs_end = repetitive_overlaps.front().lhs_end;
           // stop dummy
@@ -232,10 +229,10 @@ std::vector<Annotation> Annotate(
 
 void Reconstruct(
     std::vector<Annotation>* annotations,
-    const std::vector<std::unique_ptr<biosoup::Sequence>>& src,
-    const std::vector<std::unique_ptr<biosoup::Sequence>>& dst,
+    const std::vector<std::unique_ptr<biosoup::NucleicAcid>>& src,
+    const std::vector<std::unique_ptr<biosoup::NucleicAcid>>& dst,
     std::shared_ptr<thread_pool::ThreadPool> thread_pool) {
-  ram::MinimizerEngine minimizer_engine{15, 5, 500, 4, 100, 10000, thread_pool};
+  ram::MinimizerEngine minimizer_engine{thread_pool};
   minimizer_engine.Minimize(dst.begin(), dst.end());
   minimizer_engine.Filter(0.001);
 
@@ -324,12 +321,12 @@ void Reconstruct(
 
     graph_s << "S\t" << src[sources[rank[i]]]->name << "\t"
             << "*" << "\t"
-            << "LN:i:" << src[sources[rank[i]]]->data.size() << "\t"
+            << "LN:i:" << src[sources[rank[i]]]->inflated_len << "\t"
             << "UR:Z:ratlesnake_solid.fasta"
             << std::endl;
 
     solid_s << ">" << src[sources[rank[i]]]->name
-            << " LN:i:" << src[sources[rank[i]]]->data.size()
+            << " LN:i:" << src[sources[rank[i]]]->inflated_len
             << " XB:i:" << overlaps[rank[i]].lhs_begin
             << " XE:i:" << overlaps[rank[i]].lhs_end;
     for (const auto& it : (*annotations)[sources[rank[i]]].chimeric_regions) {
@@ -343,7 +340,7 @@ void Reconstruct(
 
     solid_s << " " << sources[rank[i]];
     solid_s << std::endl
-            << src[sources[rank[i]]]->data
+            << src[sources[rank[i]]]->InflateData()
             << std::endl;
 
     nodes[k].id = rank[i];
@@ -387,7 +384,7 @@ void Reconstruct(
         i = rank_to_node[nodes[i].edges.front()];
       }
       std::uint32_t rhs_end = overlaps[nodes[i].id].rhs_end;
-      std::cerr << " -> " << static_cast<double>(rhs_end - rhs_begin) / dst[rhs_id - src.size()]->data.size();  // NOLINT
+      std::cerr << " -> " << static_cast<double>(rhs_end - rhs_begin) / dst[rhs_id - src.size()]->inflated_len;  // NOLINT
     }
     std::cerr << std::endl;
 
@@ -405,10 +402,10 @@ void Reconstruct(
       if ((*annotations)[it->id].is_junk) {
         num_junk++;
         junk_s << ">" << it->name
-               << " LN:i:" << it->data.size()
+               << " LN:i:" << it->inflated_len
                << " " << it->id;
         junk_s << std::endl
-               << it->data
+               << it->InflateData()
                << std::endl;
         continue;
       }
@@ -416,7 +413,7 @@ void Reconstruct(
         ++num_contained;
         const auto& intervals = (*annotations)[it->id].inclusion_intervals;
         contained_s << ">" << it->name
-                    << " LN:i:" << it->data.size()
+                    << " LN:i:" << it->inflated_len
                     << " XB:i:" << intervals.back().first
                     << " XE:i:" << intervals.back().second;
         for (std::uint32_t i = 0; i < intervals.size() - 1; ++i) {
@@ -424,33 +421,33 @@ void Reconstruct(
         }
         contained_s << " " << it->id;
         contained_s << std::endl
-                    << it->data
+                    << it->InflateData()
                     << std::endl;
       }
       if (!(*annotations)[it->id].chimeric_regions.empty()) {
         ++num_chimeric;
         chimeric_s << ">" << it->name
-                   << " LN:i:" << it->data.size();
+                   << " LN:i:" << it->inflated_len;
         for (const auto& jt : (*annotations)[it->id].chimeric_regions) {
           chimeric_s << " YB:i:" << jt.first
                      << " YE:i:" << jt.second;
         }
         chimeric_s << " " << it->id;
         chimeric_s << std::endl
-                   << it->data
+                   << it->InflateData()
                    << std::endl;
       }
       if (!(*annotations)[it->id].repetitive_regions.empty()) {
         ++num_repetitive;
         repetitive_s << ">" << it->name
-                     << " LN:i:" << it->data.size();
+                     << " LN:i:" << it->inflated_len;
         for (const auto& jt : (*annotations)[it->id].repetitive_regions) {
           repetitive_s << " ZB:i:" << jt.first
                        << " ZE:i:" << jt.second;
         }
         repetitive_s << " " << it->id;
         repetitive_s << std::endl
-                    << it->data
+                    << it->InflateData()
                     << std::endl;
       }
     }
@@ -480,7 +477,7 @@ int main(int argc, char** argv) {
   while ((arg = getopt_long(argc, argv, optstr.c_str(), options, nullptr)) != -1) {  // NOLINT
     switch (arg) {
       case 't': num_threads = atoi(optarg); break;
-      case 'v': std::cout << ratlesnake_version << std::endl; return 0;
+      case 'v': std::cout << VERSION << std::endl; return 0;
       case 'h': Help(); return 0;
       default: return 1;
     }

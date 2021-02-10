@@ -4,11 +4,11 @@
 
 Tool for assessing third generation sequencing data for genome assembly.
 
-## Description
+## Usage
 
 Ratlesnake was designed to aid development of new assembly algorithms. Given a reference genome, it calculates the most contiguous assembly possible for each chromosome separately. In addition, it classifies sequences into distinct classes and annotates related events, such as breaking points in chimeric sequences, inclusion intervals of contained sequences and repetitive genomic regions in sequences overlapping them.
 
-Ratlesnake takes as input two files: third generation sequencing data in FASTA/FASTQ format and the corresponding reference genome, as well in FASTA/FASTQ format. All input files **can be compressed with gzip** (which will have impact on parsing time). Output is a set of files which are described bellow:
+Ratlesnake takes as input two files: third generation sequencing data in FASTA/FASTQ format and the corresponding reference genome, as well in FASTA/FASTQ format. Output is a set of files which are described bellow:
 
 * `ratlesnake.gfa`
     * contains the assembly graph of each chromosome (multiple parts per chromosome possible)
@@ -34,56 +34,39 @@ Ratlesnake takes as input two files: third generation sequencing data in FASTA/F
     * contains sequences that are overlapping repetitive genomic regions
         * ZB/ZE - as above
 
-## Dependencies
-
-1. gcc 4.8+ or clang 3.4+
-2. cmake 3.2+
-
-## Installation
-
-CmakeLists is provided in the project root folder. By running the following commands:
+To build ratlesnake run the following commands:
 
 ```bash
-git clone --recursive https://github.com/lbcb-sci/ratlesnake ratlesnake
-cd ratlesnake
-mkdir build
-cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make
+git clone https://github.com/lbcb-sci/ratlesnake && cd ratlesnake && mkdir build &&  cd build
+cmake -DCMAKE_BUILD_TYPE=Release .. && make
 ```
-a executable named `ratlesnake` will appear in the `build/lib` directory.
 
-Optionally, you can run `sudo make install` to install Ratlesnake to your machine.
-
-***Note***: if you omitted `--recursive` from `git clone`, run `git submodule init` and `git submodule update` before proceeding with compilation.
-
-## Usage
-
-Usage of ratlesnake is as following:
+which will create the ratlesnake executable (installable with `make install`). Running it will display the following usage:
 
 ```bash
 usage: ratlesnake [options ...] <sequences> <reference>
 
-    <sequences>
-        input file in FASTA/FASTQ format (can be compressed with gzip)
-        containing sequences
-    <reference>
-        input file in FASTA/FASTQ format (can be compressed with gzip)
-        containing a reference genome
+  <sequences>/<reference>
+    input file in FASTA/FASTQ format (can be compressed with gzip)
 
-    options:
-        -t, --threads <int>
-            default: 1
-            number of threads
-        --version
-            prints the version number
-        -h, --help
-            prints the usage
+  options:
+    -t, --threads <int>
+      default: 1
+      number of threads
+    --version
+      prints the version number
+    -h, --help
+      prints the usage
 ```
 
-## Contact information
+#### Dependencies
 
-For additional information, help and bug reports please send an email to one of the following: robert.vaser@fer.hr.
+- gcc 4.8+ | clang 3.5+
+- cmake 3.11+
+- zlib 1.2.8+
+
+###### Hidden
+- lbcb-sci/ram 2.0.0
 
 ## Acknowledgement
 
