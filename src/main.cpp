@@ -816,16 +816,25 @@ void Reconstruct(
   std::size_t td = log10(max_ref_len) + 1;
 
   for (std::uint32_t i = 0, j = 0; i < reference.size(); ++i) {
-    std::ofstream os(reference[i]->name + "_reconstruction.gfa");
-
     std::cout << std::string(max_name_len + 2 * td + 15, '-')
               << std::endl;
 
     std::cout << reference[i]->name
               << std::string(max_name_len - reference[i]->name.size(), ' ')
               << " =";
-    bool is_first = true;
 
+    if (overlaps[j].rhs_id != i) {
+      std::cout << " [" << std::setw(td) << 0 << ", "
+                        << std::setw(td) << 0 << "]"
+                << std::fixed << std::setprecision(3)
+                << " (" << 0. << ")"
+                << std::endl;
+      continue;
+    }
+
+    std::ofstream os(reference[i]->name + "_reconstruction.gfa");
+
+    bool is_first = true;
     std::uint32_t rhs_begin = -1, rhs_end;
     for (; j < overlaps.size(); ++j) {
       if (overlaps[j].rhs_id != i) {
