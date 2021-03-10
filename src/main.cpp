@@ -106,6 +106,10 @@ std::uint32_t OverlapLength(const biosoup::Overlap& o) {
   return std::max(o.rhs_end - o.rhs_begin, o.lhs_end - o.lhs_begin);
 }
 
+double OverlapScore(const biosoup::Overlap& o) {  // harmonic mean
+  return 2 * OverlapLength(o) * o.score / (OverlapLength(o) + o.score);
+}
+
 void Analyse(const std::string& sequences_path) {
   auto sparser = CreateParser<biosoup::Sequence>(sequences_path);
 
@@ -136,7 +140,7 @@ void Analyse(const std::string& sequences_path) {
   // length
   std::sort(lens.begin(), lens.end());
   std::size_t total = std::accumulate(lens.begin(), lens.end(), 0ULL);
-  std::size_t td = log10(std::max(total, lens.size())) + 1;
+  std::size_t td = std::log10(std::max(total, lens.size())) + 1;
 
   std::cout << "Num seq    = " << std::setw(td) << lens.size()
             << std::endl
@@ -175,8 +179,8 @@ void Analyse(const std::string& sequences_path) {
     hist_max = std::max(hist_max, it.second);
   }
   hist_max = std::max(hist_max, whales);
-  std::size_t nd = std::max(hist_max > 0 ? log10(hist_max) + 1 : 1, 3.);
-  std::size_t ld = std::max(hist_max > 0 ? log(hist_max) : 0, 3.);
+  std::size_t nd = std::max(hist_max > 0 ? std::log10(hist_max) + 1 : 1, 3.);
+  std::size_t ld = std::max(hist_max > 0 ? std::log(hist_max) : 0, 3.);
 
   std::cout << std::string(nd + ld + 14, '-') << std::endl;
   std::cout << "    Len" << " | "
@@ -188,14 +192,14 @@ void Analyse(const std::string& sequences_path) {
               << " | "
               << std::setw(nd) << it.second
               << " | "
-              << std::string(it.second > 0 ? log(it.second) : 0, '/')
+              << std::string(it.second > 0 ? std::log(it.second) : 0, '/')
               << std::endl;
   }
   std::cout << "  _v_  "
             << " | "
             << std::setw(nd) << whales
             << " | "
-            << std::string(whales > 0 ? log(whales) : 0, '/')
+            << std::string(whales > 0 ? std::log(whales) : 0, '/')
             << std::endl;
   std::cout << " (___\\/" << " | " << std::string(nd, ' ')<< " |" << std::endl;
   std::cout << std::string(nd + ld + 14, '-') << std::endl;
@@ -228,8 +232,8 @@ void Analyse(const std::string& sequences_path) {
   for (const auto& it : hist) {
     hist_max = std::max(hist_max, it.second);
   }
-  nd = std::max(hist_max > 0 ? log10(hist_max) + 1 : 1, 3.);
-  ld = std::max(hist_max > 0 ? log(hist_max) : 0, 3.);
+  nd = std::max(hist_max > 0 ? std::log10(hist_max) + 1 : 1, 3.);
+  ld = std::max(hist_max > 0 ? std::log(hist_max) : 0, 3.);
 
   std::cout << std::string(nd + ld + 13, '-') << std::endl;
   std::cout << " Phred" << " | "
@@ -241,7 +245,7 @@ void Analyse(const std::string& sequences_path) {
               << " | "
               << std::setw(nd) << it.second
               << " | "
-              << std::string(it.second > 0 ? log(it.second) : 0, '/')
+              << std::string(it.second > 0 ? std::log(it.second) : 0, '/')
               << std::endl;
   }
   std::cout << std::string(nd + ld + 13, '-') << std::endl;
@@ -287,15 +291,15 @@ void Analyse(
               if (ovl.empty()) {
                 return;
               }
+              if (OverlapLength(overlaps[sequence->id]) != 0) {
+                ovl.emplace_back(overlaps[sequence->id]);
+              }
               std::sort(ovl.begin(), ovl.end(),
                   [&] (const biosoup::Overlap& lhs,
                        const biosoup::Overlap& rhs) -> bool {
-                    return OverlapLength(lhs) > OverlapLength(rhs);
+                    return OverlapScore(lhs) > OverlapScore(rhs);
                   });
-              if (OverlapLength(overlaps[sequence->id]) <
-                  OverlapLength(ovl.front())) {
-                overlaps[sequence->id] = ovl.front();
-              }
+              overlaps[sequence->id] = ovl.front();
             },
             std::ref(it)));
       }
@@ -365,7 +369,7 @@ void Analyse(
   }
   std::sort(accs.begin(), accs.end());
   double total = std::accumulate(accs.begin(), accs.end(), 0.);
-  std::size_t td = std::max(log10(accs.size()) + 1, 6.);
+  std::size_t td = std::max(std::log10(accs.size()) + 1, 6.);
 
   std::cout << "Num seq    = " << std::setw(td) << accs.size()
             << std::endl
@@ -408,8 +412,8 @@ void Analyse(
       ++it;
     }
   }
-  std::size_t nd = std::max(hist_max > 0 ? log10(hist_max) + 1 : 1, 3.);
-  std::size_t ld = std::max(hist_max > 0 ? log(hist_max) : 0, 3.);
+  std::size_t nd = std::max(hist_max > 0 ? std::log10(hist_max) + 1 : 1, 3.);
+  std::size_t ld = std::max(hist_max > 0 ? std::log(hist_max) : 0, 3.);
 
   std::cout << std::string(nd + ld + 14, '-') << std::endl;
   std::cout << "    Acc" << " | "
@@ -421,14 +425,14 @@ void Analyse(
               << " | "
               << std::setw(nd) << it.second
               << " | "
-              << std::string(it.second > 0 ? log(it.second) : 0, '/')
+              << std::string(it.second > 0 ? std::log(it.second) : 0, '/')
               << std::endl;
   }
   std::cout << std::string(nd + ld + 14, '-') << std::endl;
   std::cout << "   Junk" << " | "
             << std::setw(nd) << num_junk
             << " | "
-            << std::string(num_junk > 0 ? log(num_junk) : 0, '/')
+            << std::string(num_junk > 0 ? std::log(num_junk) : 0, '/')
             << std::endl;
   std::cout << std::string(nd + ld + 14, '-') << std::endl;
 }
@@ -673,7 +677,7 @@ void Annotate(
   os_contained.close();
   os_uncontained.close();
 
-  std::size_t td = log10(overlaps.size()) + 1;
+  std::size_t td = std::log10(overlaps.size()) + 1;
   std::cout << "Num seq    = " << std::setw(td) << overlaps.size()
             << std::endl
             << "Num uncont = " << std::setw(td) << num_uncontained
@@ -813,7 +817,7 @@ void Reconstruct(
     max_name_len = std::max(max_name_len, it->name.size());
     max_ref_len = std::max(max_ref_len, it->inflated_len);
   }
-  std::size_t td = log10(max_ref_len) + 1;
+  std::size_t td = std::log10(max_ref_len) + 1;
 
   for (std::uint32_t i = 0, j = 0; i < reference.size(); ++i) {
     std::cout << std::string(max_name_len + 2 * td + 15, '-')
