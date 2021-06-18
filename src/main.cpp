@@ -107,7 +107,7 @@ std::uint32_t OverlapLength(const biosoup::Overlap& o) {
 }
 
 double OverlapScore(const biosoup::Overlap& o) {  // harmonic mean
-  return 2 * OverlapLength(o) * o.score / (OverlapLength(o) + o.score);
+  return ((2. * OverlapLength(o)) * o.score) / (OverlapLength(o) + o.score);
 }
 
 void Analyse(const std::string& sequences_path) {
