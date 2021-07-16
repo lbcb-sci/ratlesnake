@@ -1,8 +1,8 @@
 # Ratlesnake
 
-[![Build status for c++/clang++](https://travis-ci.org/lbcb-sci/ratlesnake.svg?branch=master)](https://travis-ci.org/lbcb-sci/ratlesnake)
+![Build status for gcc/clang](https://github.com/lbcb-sci/ratlesnake/actions/workflows/ratlesnake.yml/badge.svg)
 
-Tool for assessing third generation sequencing data for genome assembly.
+Tool for assessing sequencing data.
 
 ## Usage
 
