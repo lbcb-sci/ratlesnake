@@ -27,6 +27,7 @@ std::atomic<std::uint32_t> biosoup::Sequence::num_objects{0};
 namespace {
 
 static struct option options[] = {
+  {"tweak", required_argument, nullptr, 'T'},
   {"threads", required_argument, nullptr, 't'},
   {"result", required_argument, nullptr, 'r'},
   {"version", no_argument, nullptr, 'v'},
@@ -77,6 +78,8 @@ void Help() {
       "    input file in FASTA/FASTQ format (can be compressed with gzip)\n"
       "\n"
       "  options:\n"
+      "    --tweak <int>\n"
+      "      default: 128\n"
       "    -t, --threads <int>\n"
       "      default: 1\n"
       "      number of threads\n"
@@ -99,6 +102,8 @@ void Help() {
 }
 
 }  // namespace
+
+std::uint32_t tweak = 128;
 
 namespace ratlesnake {
 
@@ -503,6 +508,11 @@ void Annotate(
             // annotate chimeric regions
             for (std::uint32_t i = 0, j = 1; j < overlaps.size(); ++j) {
               if (overlaps[i].lhs_end >= overlaps[j].lhs_end) {
+                repeats.emplace_back(overlaps[j]);
+              } else if (overlaps[j].lhs_begin - overlaps[i].lhs_begin < tweak) {
+                repeats.emplace_back(overlaps[i]);
+                i = j;
+              } else if (overlaps[j].lhs_end - overlaps[i].lhs_end < tweak) {
                 repeats.emplace_back(overlaps[j]);
               } else {
                 bool is_chimeric = true;
@@ -909,6 +919,7 @@ int main(int argc, char** argv) {
   int arg;
   while ((arg = getopt_long(argc, argv, optstr.c_str(), options, nullptr)) != -1) {  // NOLINT
     switch (arg) {
+      case 'T': tweak = atoi(optarg); break;
       case 't': num_threads = atoi(optarg); break;
       case 'r': results.emplace_back(atoi(optarg)); break;
       case 'v': std::cout << VERSION << std::endl; return 0;
