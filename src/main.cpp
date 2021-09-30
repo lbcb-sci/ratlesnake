@@ -504,6 +504,11 @@ void Annotate(
             for (std::uint32_t i = 0, j = 1; j < overlaps.size(); ++j) {
               if (overlaps[i].lhs_end >= overlaps[j].lhs_end) {
                 repeats.emplace_back(overlaps[j]);
+              } else if (overlaps[j].lhs_begin - overlaps[i].lhs_begin < 500) {
+                repeats.emplace_back(overlaps[i]);
+                i = j;
+              } else if (overlaps[j].lhs_end - overlaps[i].lhs_end < 500) {
+                repeats.emplace_back(overlaps[j]);
               } else {
                 bool is_chimeric = true;
                 if (overlaps[i].rhs_id == overlaps[j].rhs_id &&
