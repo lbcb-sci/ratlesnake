@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.11)
 
-project(ratlesnake VERSION 0.5.5
+project(ratlesnake VERSION 0.5.6
                    LANGUAGES CXX)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic")

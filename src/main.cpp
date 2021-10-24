@@ -491,60 +491,115 @@ void Annotate(
               return overlaps.front();
             }
 
+            // annotate chimeric regions
+            // - look for largest overlap per target
             std::sort(overlaps.begin(), overlaps.end(),
                 [] (const biosoup::Overlap& lhs,
                     const biosoup::Overlap& rhs) -> bool {
-                  return (lhs.lhs_begin <  rhs.lhs_begin) ||
-                         (lhs.lhs_begin == rhs.lhs_begin && lhs.lhs_end > rhs.lhs_end);  // NOLINT
+                  if (lhs.rhs_id != rhs.rhs_id) {
+                    return lhs.rhs_id < rhs.rhs_id;
+                  }
+                  if (lhs.lhs_begin != rhs.lhs_begin) {
+                    return lhs.lhs_begin < rhs.lhs_begin;
+                  }
+                  return lhs.lhs_end > rhs.lhs_end;
                 });
 
             std::vector<biosoup::Overlap> repeats;
+            std::vector<bool> marked(overlaps.size(), 1);
 
-            // annotate chimeric regions
+            overlaps.emplace_back(-1, -1, -1, -1, -1, -1, 0);  // dummy
             for (std::uint32_t i = 0, j = 1; j < overlaps.size(); ++j) {
-              if (overlaps[i].lhs_end >= overlaps[j].lhs_end) {
+              if (overlaps[i].rhs_id != overlaps[j].rhs_id) {
+                i = j;
+                continue;
+              }
+
+              if (overlaps[i].lhs_end >= overlaps[j].lhs_end ||
+                  overlaps[j].lhs_end -  overlaps[i].lhs_end < 500) {
                 repeats.emplace_back(overlaps[j]);
+                marked[j] = 0;
               } else if (overlaps[j].lhs_begin - overlaps[i].lhs_begin < 500) {
                 repeats.emplace_back(overlaps[i]);
+                marked[i] = 0;
                 i = j;
-              } else if (overlaps[j].lhs_end - overlaps[i].lhs_end < 500) {
-                repeats.emplace_back(overlaps[j]);
-              } else {
-                bool is_chimeric = true;
-                if (overlaps[i].rhs_id == overlaps[j].rhs_id &&
-                    overlaps[i].strand == overlaps[j].strand) {
-                  std::size_t ref_len =
-                      reference[overlaps[i].rhs_id]->inflated_len;
+              } else if (overlaps[i].strand == overlaps[j].strand) {
+                // check if alignment is broken due to circularity
+                // ---------------          ---------------
+                // |          i  |          | i           |
+                // |           i |          |i            |
+                // |            i|    or    |            j|
+                // |j            |          |           j |
+                // | j           |          |          j  |
+                // ---------------          ---------------
+                std::size_t ref_len =
+                    reference[overlaps[i].rhs_id]->inflated_len;
 
-                  if (( overlaps[i].strand && overlaps[j].rhs_begin < 256 && overlaps[i].rhs_end > ref_len - 256) ||  // NOLINT
-                      (!overlaps[i].strand && overlaps[i].rhs_begin < 256 && overlaps[j].rhs_end > ref_len - 256)) {  // NOLINT
-                    is_chimeric = false;
-                  } else {
-                    std::int32_t lhs_gap =
-                        overlaps[j].lhs_begin - overlaps[i].lhs_end;
-                    std::int32_t rhs_gap = overlaps[i].strand ?
-                        overlaps[j].rhs_begin - overlaps[i].rhs_end :
-                        overlaps[i].rhs_begin - overlaps[j].rhs_end;
-                    is_chimeric = std::abs(lhs_gap - rhs_gap) > 1280;
-                  }
+                if (overlaps[i].strand &&
+                    overlaps[j].rhs_begin + (ref_len - overlaps[i].rhs_end) < 500) {  // NOLINT
+                  overlaps[i].lhs_end = overlaps[j].lhs_end;
+                  overlaps[i].rhs_end +=
+                      (overlaps[j].rhs_end - overlaps[j].rhs_begin);
+                  marked[j] = 0;
+                } else if (!overlaps[i].strand &&
+                    overlaps[i].rhs_begin + (ref_len - overlaps[j].rhs_end) < 500) {  // NOLINT
+                  overlaps[j].lhs_begin = overlaps[i].lhs_begin;
+                  overlaps[j].rhs_end +=
+                      (overlaps[i].rhs_end - overlaps[i].rhs_begin);
+                  marked[i] = 0;
                 }
-                if (is_chimeric) {
-                  if (overlaps[i].lhs_end < overlaps[j].lhs_begin) {
-                    chimeric_regions[sequence->id].emplace_back(
-                        overlaps[i].lhs_end,
-                        overlaps[j].lhs_begin);
-                  } else {
-                    chimeric_regions[sequence->id].emplace_back(
-                        overlaps[j].lhs_begin,
-                        overlaps[i].lhs_end);
+              }
+            }
+            overlaps.pop_back();
+
+            // - check inconsistencies between longest overlaps on all targets
+            std::vector<biosoup::Overlap> chimeric;
+            for (std::uint32_t i = 0; i < marked.size(); ++i) {
+              if (marked[i]) {
+                chimeric.emplace_back(overlaps[i]);
+              }
+            }
+            std::sort(chimeric.begin(), chimeric.end(),
+                [] (const biosoup::Overlap& lhs,
+                    const biosoup::Overlap& rhs) -> bool {
+                  if (lhs.lhs_begin != rhs.lhs_begin) {
+                    return lhs.lhs_begin < rhs.lhs_begin;
                   }
+                  return lhs.lhs_end > rhs.lhs_end;
+                });
+
+            for (std::uint32_t i = 0, j = 1; j < chimeric.size(); ++j) {
+              if (chimeric[i].lhs_end >= chimeric[j].lhs_end ||
+                  chimeric[j].lhs_end -  chimeric[i].lhs_end < 500) {
+                repeats.emplace_back(chimeric[j]);
+              } else if (chimeric[j].lhs_begin - chimeric[i].lhs_begin < 500) {
+                repeats.emplace_back(chimeric[i]);
+                i = j;
+              } else {
+                if (chimeric[i].lhs_end < chimeric[j].lhs_begin) {
+                  chimeric_regions[sequence->id].emplace_back(
+                      chimeric[i].lhs_end,
+                      chimeric[j].lhs_begin);
+                } else {
+                  chimeric_regions[sequence->id].emplace_back(
+                      chimeric[j].lhs_begin,
+                      chimeric[i].lhs_end);
                 }
                 i = j;
               }
             }
 
             // annotate repetitive regions
-            repeats.emplace_back(-1, -1, -1, -1, -1, -1, -1, 0);
+            std::sort(repeats.begin(), repeats.end(),
+                [] (const biosoup::Overlap& lhs,
+                    const biosoup::Overlap& rhs) -> bool {
+                  if (lhs.lhs_begin != rhs.lhs_begin) {
+                    return lhs.lhs_begin < rhs.lhs_begin;
+                  }
+                  return lhs.lhs_end > rhs.lhs_end;
+                });
+            repeats.emplace_back(-1, -1, -1, -1, -1, -1, 0);  // dummy
+
             for (std::uint32_t i = 0, j = 1; j < repeats.size(); ++j) {
               if (repeats[i].lhs_end < repeats[j].lhs_begin) {
                 if ((repeats[i].lhs_end - repeats[i].lhs_begin > 500) &&
@@ -884,7 +939,7 @@ void Reconstruct(
           overlaps[j + 1].rhs_id > i ||
           overlaps[j + 1].rhs_begin > overlaps[j].rhs_end) {
         if (!is_first) {
-          std::cerr << std::string(max_name_len + 2, ' ');
+          std::cout << std::string(max_name_len + 2, ' ');
         }
         is_first = false;
         std::cout << " [" << std::setw(td) << rhs_begin << ", "
